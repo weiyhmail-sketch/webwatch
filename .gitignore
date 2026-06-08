@@ -1,0 +1,17 @@
+# secrets — 绝不进 git（红线 #5）
+config/secrets.*.env
+!config/secrets.env.example
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# os
+.DS_Store

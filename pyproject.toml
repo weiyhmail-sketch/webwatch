@@ -1,0 +1,54 @@
+[project]
+name = "webwatch"
+version = "0.1.0"
+description = "IBKR 手动超短线下单面板 (manual discretionary scalping panel)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pyyaml>=6",
+    # 复用 scalper 执行层（单一真相源，pin 到具体 commit 避免漂移）。
+    # 会传递带来 ib-async / pandas / pydantic-settings / loguru 等运行时依赖。
+    "scalper @ git+ssh://git@github.com/weiyhmail-sketch/scalper.git@1f335cbcd3154484c63adaade69ee4215ee69f97",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "mypy>=1.13",
+    "ruff>=0.8",
+    "types-pyyaml>=6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# 允许 scalper 的 git 直接引用依赖
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/webwatch"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: 需要 IB Gateway (paper 4002) 的集成测试；CI 跳过",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+ignore_missing_imports = true

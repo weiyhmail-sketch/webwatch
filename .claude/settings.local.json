@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh auth *)",
+      "Bash(gh repo *)",
+      "Bash(gh api *)",
+      "Bash(cd /tmp && echo \"===== broker_adapter.py =====\"; gh api -H \"Accept: application/vnd.github.raw\" \"repos/weiyhmail-sketch/scalper/contents/src/scalper/execution/broker_adapter.py\" 2>&1 | grep -E \"def |class |\\\\.\\\\.\\\\.| -> \" | head -60)",
+      "Bash(uv sync *)"
+    ]
+  }
+}

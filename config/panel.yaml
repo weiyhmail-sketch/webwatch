@@ -1,0 +1,43 @@
+# 面板默认参数（非 secrets，可进 git）。下单时可在前端临时改。
+
+# 止盈/止损目标支持三种表达方式（kind）：
+#   pct           百分比，value=0.002 表示 +0.2%
+#   price_offset  每股价格偏移，value=1 表示成交价 ±$1
+#   profit_usd    总盈/亏金额，value=100 表示盈利/亏损达 $100（按手数反推每股）
+take_profit:
+  kind: pct
+  value: 0.002              # 默认 +0.2%（你的超短线目标）
+stop_loss:
+  kind: pct
+  value: 0.004              # 默认 -0.4%（2:1，按需调）
+
+default_quantity: 100       # 默认手数（股）
+default_notional_usd: 2000  # 或按金额下单（二选一，前端可切）
+
+# 挂单模式：native = 原生 parent+TP+SL 同时发出（零空窗，限价默认）
+#           on_fill = 成交后用真实成交价精确挂 OCA 兄弟单（市价默认）
+bracket_mode: native
+
+# IBKR 行情类型：1=实时(需订阅) 2=冻结 3=延迟 4=延迟冻结。
+# 超短线实盘必须用 1；若账户暂无实时行情订阅，开发期可设 3 看延迟报价。
+market_data_type: 1
+
+risk:
+  # 单笔 notional 上限（下单前风控会拒超限单）。
+  # live 首周建议设小，例如 500，验证稳定后再放宽。
+  max_order_notional_usd: 5000
+  # 单笔最大亏损 ≤ 此比例 × NAV（镜像 scalper 0.5%）。超限拒单。
+  max_position_risk_pct: 0.005
+  # 净值低于此值时受 PDT 限制（仅提示，不拒单）。
+  pdt_min_nav: 25000
+
+commission:
+  per_share_usd: 0.0035       # IBKR Pro Tiered 假设（与 scalper 一致）
+  min_per_order_usd: 0.35     # 每单最低佣金
+
+# 键盘快捷键（M5 接入；前端按此映射）
+hotkeys:
+  market_buy: "b"
+  limit_buy: "l"
+  flatten_all: "f"
+  cancel_all: "c"
