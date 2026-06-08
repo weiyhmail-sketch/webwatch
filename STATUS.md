@@ -50,10 +50,10 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 - [x] **M7 红线 #1 live 切换**（已实现）：
   - 进 live 二重互锁：`WEBWATCH_ENV=live` **且** `WEBWATCH_LIVE_CONFIRM=YES`，缺一回退 paper（已实测）。
   - live 醒目标识：顶部红色脉冲横幅 + env 徽章红；互锁回退时琥珀色警告条。
-  - live 首周单笔上限：`live_max_order_notional_usd`（默认 $20000，仅 live 生效，超限拒单）。
+  - live 首周单笔上限：`live_max_order_notional_usd`（$20000，仅 live 生效，超限拒单）。
   - live 每笔下单 confirm 弹窗加 "🔴 LIVE 实盘" 前缀。
-  - ⚠️ **配置注意**：当前 `max_order_notional_usd=5000` < live 上限 20000，**5000 才是实际生效的更小约束**；
-    要让 20000 live 上限成为绑定约束，需同时把 `max_order_notional_usd` 调到 ≥20000。
+  - 通用 `max_order_notional_usd` 已调到 **$20000**（commit da2d4f6），与 live 上限对齐
+    → 实际每笔上限 $20000（paper/live 通用）。要更保守可下调它。
 
 ### 如何切 live（M6 paper 验证通过 + 用户明确批准后）
 ```bash
