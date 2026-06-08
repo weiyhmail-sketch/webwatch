@@ -30,7 +30,7 @@ from webwatch.order_service import (
     plan_to_dict,
 )
 from webwatch.pricing import Target, TargetKind
-from webwatch.risk import WARN, RiskFinding, finding_to_dict
+from webwatch.risk import BLOCK, WARN, RiskFinding, finding_to_dict
 from webwatch.risk import assess as risk_assess
 from webwatch.risk import blocks as risk_blocks
 
@@ -104,16 +104,24 @@ def _risk_for(
         buying_power=buying_power,
         panel=panel,
     )
-    # 已连接但读不到账户数据 → 账户级风控（最大亏损/购买力）静默失效，必须显式告警。
+    # 已连接但读不到账户数据 → 账户级风控（最大亏损/购买力）失效。
+    # fail-closed：超过"盲飞上限"的单直接 BLOCK；之下仅 WARN。
     if broker_.is_connected() and nav is None:
-        findings = [
-            RiskFinding(
+        notional = entry * quantity
+        if notional > panel.account_unavailable_max_notional_usd:
+            extra = RiskFinding(
+                "account_unavailable_block",
+                BLOCK,
+                f"账户数据不可用且金额 ${notional} 超过盲飞上限 "
+                f"${panel.account_unavailable_max_notional_usd}，已拒单（账户级风控失效时不放大单）",
+            )
+        else:
+            extra = RiskFinding(
                 "account_unavailable",
                 WARN,
                 "账户数据不可用：单笔最大亏损/购买力检查未生效，仅 notional 上限仍有效，请谨慎下单",
-            ),
-            *findings,
-        ]
+            )
+        findings = [extra, *findings]
     return findings
 
 

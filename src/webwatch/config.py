@@ -130,6 +130,11 @@ class PanelConfig:
         self.max_position_risk_pct = Decimal(str(risk.get("max_position_risk_pct", "0.005")))
         # PDT 提示阈值：净值低于此值受日内交易限制。
         self.pdt_min_nav = Decimal(str(risk.get("pdt_min_nav", "25000")))
+        # 账户数据不可用（账户级风控失效）时，超过此 notional 的单直接拒（fail-closed）；
+        # 之下仅 WARN。盲飞时把规模封死在小额，保护真金白银。
+        self.account_unavailable_max_notional_usd = Decimal(
+            str(risk.get("account_unavailable_max_notional_usd", "1000"))
+        )
         comm = raw.get("commission", {}) or {}
         self.commission_per_share_usd = Decimal(str(comm.get("per_share_usd", "0.0035")))
         self.commission_min_per_order_usd = Decimal(str(comm.get("min_per_order_usd", "0.35")))

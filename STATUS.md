@@ -37,13 +37,19 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 **自查 8 个（5 P0）+ 外审 2 轮各 1 个 P0**，全部修复 + 回归测试，**95 单测全绿**，mypy --strict + ruff 通过。
 裸仓红线 #3 的四类失效（反向开仓 / 漏平 / 误判保护失败 / 入场超时静默）已逐一堵死。
 
-**切 live 前硬化清单**（三轮复核累积，非 paper 阻塞，进 live 前必做）：
-1. D4 升级：账户不可用时对超阈值大单 fail-closed（非仅 WARN）。
-2. flatten_all / cancel_all 紧急路径不竞争入场锁（或把 fill 超时压到 1-2s）。
-3. EntryUncertain 路径评估自动对账平仓；紧急平仓 placeOrder 失败显式抛"裸仓未平"告警态。
-4. 真实做空保证金（risk 空头购买力当前按 entry×qty 估）。
-5. _cancel_trades→_emergency_flatten 窄竞态：平后对账兜。
-6. 红线 #1 live 切换：双确认 + 醒目标识 + 首周小手数（M7）。
+**切 live 前硬化清单**（三轮复核累积）：
+- [x] **1. D4 fail-closed**：账户不可用时，超 `account_unavailable_max_notional_usd`($1000) 的单直接拒，
+  之下仅 WARN（app `_risk_for`）。
+- [x] **2. 压短锁持有**：fill/protect 超时 5s/2s → **2s/2s**，最坏持锁 ~4s，减少撤单/全平排队
+  （完整"紧急路径抢占入场锁"留作后续；当前 IOC 亚秒、影响小）。
+- [x] **3. 裸仓显式告警**：紧急平仓下单本身失败 → `_flatten_or_alert` 抛 `flatten.failed=True`，
+  前端显示"⚠ 可能裸仓，立即手动平仓"。
+- [ ] 4. 真实做空保证金（risk 空头购买力当前按 entry×qty 估）——**UI 当前只做多(买入)，低优先**。
+- [ ] 5. `_cancel_trades`→`_emergency_flatten` 窄竞态：平后对账兜（极窄窗口，留 live 前）。
+- [ ] 6. EntryUncertain 路径自动对账平仓（当前靠用户手动查，已醒目提示）。
+- [ ] **M7 红线 #1 live 切换**：双确认 + 醒目标识 + 首周小手数（需用户拍板机制设计）。
+
+硬化后 **98 单测全绿**，mypy --strict + ruff 通过。
 
 ## 复审 round 3（2026-06-08）—— round-2 修复自身的新 P0，已修
 

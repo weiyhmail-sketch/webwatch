@@ -16,7 +16,7 @@ import contextlib
 import logging
 import math
 from decimal import Decimal
-from typing import Any, Protocol, TypeVar
+from typing import Any, NoReturn, Protocol, TypeVar
 
 from ib_async import IB, LimitOrder, MarketOrder, Stock, StopOrder, Ticker
 from scalper.execution.ib_broker_adapter import (
@@ -140,8 +140,9 @@ class BrokerManager:
         # 串行化下单/平仓操作：单个 IB 连接被多个 await 处理器共享，
         # 防止并发下单交叉（OCA 组错乱、撤单撤到刚挂的保护单等）。
         self._order_lock = asyncio.Lock()
-        # 成交等待 / 保护单确认超时（秒）。测试可调小。
-        self._fill_timeout_s = 5.0
+        # 成交等待 / 保护单确认超时（秒）。压短：下单持锁期间撤单/全平等"救命按钮"会排队，
+        # 最坏持锁 = fill + protect。IOC 入场通常亚秒级，超时只是 gateway 挂死的兜底上限。
+        self._fill_timeout_s = 2.0
         self._protect_timeout_s = 2.0
 
     # ---- 连接生命周期 ---------------------------------------------------
@@ -380,12 +381,8 @@ class BrokerManager:
 
             # 有成交但成交价无效（NaN/<=0）：有仓位却无法算保护单 → 立即平仓。
             if not math.isfinite(avg) or avg <= 0:
-                flatten = self._emergency_flatten(contract, side, filled)
-                raise ProtectionFailed(
-                    filled=filled,
-                    fill_price=Decimal("0"),
-                    reason=f"成交价无效（{avg}），无法计算保护单",
-                    flatten=flatten,
+                self._flatten_or_alert(
+                    contract, side, filled, Decimal("0"), f"成交价无效（{avg}），无法计算保护单"
                 )
 
             fill_price = Decimal(str(avg))
@@ -400,10 +397,7 @@ class BrokerManager:
             except Exception as exc:  # noqa: BLE001 — 任何保护单失败都必须平仓
                 # 先撤掉任何已挂出的保护单（避免遗留单腿在平仓后反向开新裸仓），再平仓。
                 self._cancel_trades(prot_trades)
-                flatten = self._emergency_flatten(contract, side, filled)
-                raise ProtectionFailed(
-                    filled=filled, fill_price=fill_price, reason=str(exc), flatten=flatten
-                ) from exc
+                self._flatten_or_alert(contract, side, filled, fill_price, str(exc))
 
             return {
                 "filled": filled,
@@ -536,6 +530,34 @@ class BrokerManager:
                 )
             log.warning("flatten_all: 平掉 %d 个持仓", len(closed))
             return {"flattened": closed}
+
+    def _flatten_or_alert(
+        self,
+        contract: Any,
+        side: Side,
+        filled: int,
+        fill_price: Decimal,
+        reason: str,
+    ) -> NoReturn:
+        """平仓并抛 ProtectionFailed。若**平仓下单本身失败**（断连等）= 裸仓未平，
+        抛带 ``flatten.failed=True`` 的告警，让前端给出最强"立即手动平仓"提示。"""
+        try:
+            flatten = self._emergency_flatten(contract, side, filled)
+        except Exception as flat_exc:  # noqa: BLE001 — 平仓失败本身要醒目上报
+            log.critical("EMERGENCY FLATTEN FAILED → 可能裸仓: %s", flat_exc)
+            raise ProtectionFailed(
+                filled=filled,
+                fill_price=fill_price,
+                reason=f"{reason}；且紧急平仓下单失败：{flat_exc}",
+                flatten={
+                    "failed": True,
+                    "quantity": filled,
+                    "note": "紧急平仓下单失败，可能裸仓，请立即手动平仓！",
+                },
+            ) from flat_exc
+        raise ProtectionFailed(
+            filled=filled, fill_price=fill_price, reason=reason, flatten=flatten
+        )
 
     def _emergency_flatten(self, contract: Any, side: Side, quantity: int) -> dict[str, Any]:
         """红线 #3：市价平掉刚成交的仓位，不留裸仓。直接按已确认成交量 ``quantity`` 平。

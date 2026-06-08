@@ -258,9 +258,11 @@ function showMarketResult(res) {
   const el = $('orderResult');
   if (res.protection_failed) {
     const f = res.flatten || {};
-    const flatMsg = (f.quantity && f.quantity > 0)
-      ? `已紧急平仓 ${f.quantity} 股（单号 ${f.flatten_order_id}）`
-      : `<b>未能确认平仓，请立即手动检查持仓！</b>`;
+    const flatMsg = f.failed
+      ? `<b>⚠ 紧急平仓下单也失败，可能裸仓——立即手动平仓！</b>`
+      : (f.flatten_order_id && f.quantity > 0)
+        ? `已紧急平仓 ${f.quantity} 股（单号 ${f.flatten_order_id}）`
+        : `<b>未能确认平仓，请立即手动检查持仓！</b>`;
     el.innerHTML = `<span class="neg">⚠ 保护单失败！</span> 成交 ${res.filled} 股 @ ${res.fill_price} — ${flatMsg}。原因：${res.reason}`;
     return;
   }

@@ -30,6 +30,8 @@ risk:
   max_position_risk_pct: 0.005
   # 净值低于此值时受 PDT 限制（仅提示，不拒单）。
   pdt_min_nav: 25000
+  # 账户数据不可用（账户级风控失效）时，超过此金额的单直接拒；之下仅告警。盲飞封小额。
+  account_unavailable_max_notional_usd: 1000
 
 commission:
   per_share_usd: 0.0035       # IBKR Pro Tiered 假设（与 scalper 一致）

@@ -20,8 +20,8 @@ class FakeBroker:
         self,
         *,
         protection_fails: bool = False,
-        nav: Decimal = Decimal("1000000"),
-        buying_power: Decimal = Decimal("4000000"),
+        nav: Decimal | None = Decimal("1000000"),
+        buying_power: Decimal | None = Decimal("4000000"),
     ) -> None:
         self.connected = True
         self.watchlist: list[str] = []
@@ -291,6 +291,27 @@ def test_preview_includes_risk_warnings() -> None:
         body = r.json()
         assert body["rejected"] is False
         assert any(f["code"] == "pdt" for f in body["risk"])
+
+
+def test_account_unavailable_blocks_large_order() -> None:
+    # 账户数据不可用 + 大额单 → fail-closed 拒单（盲飞不放大单）
+    fake = FakeBroker(nav=None, buying_power=None)
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/limit", json=_order_body(quantity=100, entry_limit="50"))  # 5000>1000
+        assert r.status_code == 400
+        assert "盲飞" in r.json()["reason"]
+        assert len(fake.placed) == 0
+
+
+def test_account_unavailable_warns_small_order() -> None:
+    # 账户数据不可用 + 小额单 → 仅 WARN，仍可下单
+    fake = FakeBroker(nav=None, buying_power=None)
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/limit", json=_order_body(quantity=10, entry_limit="50"))  # 500<1000
+        body = r.json()
+        assert body["rejected"] is False
+        assert any(f["code"] == "account_unavailable" for f in body["risk"])
+        assert len(fake.placed) == 1
 
 
 def test_cancel_all_endpoint() -> None:

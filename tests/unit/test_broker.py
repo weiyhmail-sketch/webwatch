@@ -146,6 +146,7 @@ class MarketFakeIB:
         sl_status: str = "Submitted",
         protection_raises: bool = False,
         sl_raises: bool = False,
+        flatten_raises: bool = False,
     ) -> None:
         self.fill_price = fill_price
         self.entry_filled = entry_filled
@@ -154,6 +155,7 @@ class MarketFakeIB:
         self.sl_status = sl_status
         self.protection_raises = protection_raises
         self.sl_raises = sl_raises
+        self.flatten_raises = flatten_raises
         self.placed: list[Any] = []
         self.cancelled: list[int] = []
         self._id = 0
@@ -180,6 +182,8 @@ class MarketFakeIB:
                 return _Trade2(order, _Status("Filled", order.totalQuantity, self.fill_price))
             return _Trade2(order, _Status("Cancelled", 0, 0.0))
         if order.orderType == "MKT":  # 后续 MKT = 紧急平仓
+            if self.flatten_raises:
+                raise RuntimeError("broker rejected flatten")
             return _Trade2(order, _Status("Filled", order.totalQuantity, self.fill_price))
         if self.protection_raises:
             raise RuntimeError("broker rejected protection")
@@ -325,6 +329,18 @@ class TestMarketWithProtection:
             )
         assert "成交价无效" in ei.value.reason
         assert sum(1 for o in fake.placed if o.orderType == "MKT") == 2  # 入场 + 平仓
+
+    async def test_flatten_order_failure_raises_naked_alert(self) -> None:
+        # 切 live 前硬化：紧急平仓下单本身失败 → flatten.failed 标记，前端给"裸仓立即手动平"强提示
+        fake = MarketFakeIB(tp_status="Cancelled", sl_status="Cancelled", flatten_raises=True)
+        bm = _bm_with(fake)
+        with pytest.raises(ProtectionFailed) as ei:
+            await bm.place_market_with_protection(
+                symbol="aapl", side=Side.LONG, quantity=10,
+                take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
+            )
+        assert ei.value.flatten.get("failed") is True
+        assert "手动平仓" in ei.value.flatten["note"]
 
     async def test_entry_timeout_raises_entry_uncertain(self) -> None:
         # 入场单超时未达终态 → 抛 EntryUncertain（可能已成交=裸仓），不静默当未成交
