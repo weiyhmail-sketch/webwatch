@@ -202,8 +202,8 @@ def test_order_preview_ok() -> None:
 
 def test_order_preview_notional_rejected() -> None:
     with _client() as c:
-        # 100 * 100 = 10000 > 默认上限 5000
-        r = c.post("/api/order/preview", json=_order_body(quantity=100, entry_limit="100"))
+        # 300 * 100 = 30000 > 上限 20000
+        r = c.post("/api/order/preview", json=_order_body(quantity=300, entry_limit="100"))
         body = r.json()
         assert body["rejected"] is True
         assert "notional" in body["reason"]
@@ -224,7 +224,7 @@ def test_order_limit_places_bracket() -> None:
 def test_order_limit_rejected_does_not_place() -> None:
     fake = FakeBroker()
     with TestClient(create_app(fake, auto_connect=False)) as c:
-        r = c.post("/api/order/limit", json=_order_body(quantity=100, entry_limit="100"))
+        r = c.post("/api/order/limit", json=_order_body(quantity=300, entry_limit="100"))
         assert r.status_code == 400
         assert r.json()["rejected"] is True
         assert len(fake.placed) == 0  # 风控拒单不下单
@@ -275,7 +275,7 @@ def test_market_order_protection_failed_surfaced() -> None:
 def test_market_order_notional_rejected_does_not_place() -> None:
     fake = FakeBroker()
     with TestClient(create_app(fake, auto_connect=False)) as c:
-        r = c.post("/api/order/market", json=_market_body(quantity=100, ref_price="100"))
+        r = c.post("/api/order/market", json=_market_body(quantity=300, ref_price="100"))
         assert r.status_code == 400
         assert len(fake.market_orders) == 0
 
