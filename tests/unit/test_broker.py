@@ -13,8 +13,23 @@ from scalper.execution.types import Position
 from scalper.strategy.base import Side
 
 from webwatch.broker import BrokerManager, EntryUncertain, ProtectionFailed, resolve_account
-from webwatch.config import IBKRSettings, PanelConfig
+from webwatch.config import Environment, IBKRSettings, PanelConfig
 from webwatch.pricing import Target
+
+
+class TestIsLiveAndSnapshot:
+    def test_is_live_reflects_environment(self) -> None:
+        paper = BrokerManager(IBKRSettings(environment=Environment.PAPER), PanelConfig({}))
+        live = BrokerManager(IBKRSettings(environment=Environment.LIVE), PanelConfig({}))
+        assert paper.is_live() is False
+        assert live.is_live() is True
+
+    def test_snapshot_exposes_env_warning_and_is_live(self) -> None:
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}), env_warning="已回退 paper")
+        snap = bm.snapshot()
+        assert snap["env_warning"] == "已回退 paper"
+        assert snap["is_live"] is False
+        assert snap["environment"] == "paper"
 
 
 class TestResolveAccount:

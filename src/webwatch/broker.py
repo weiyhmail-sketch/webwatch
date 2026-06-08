@@ -89,6 +89,7 @@ class BrokerLike(Protocol):
     async def connect(self) -> None: ...
     async def disconnect(self) -> None: ...
     def is_connected(self) -> bool: ...
+    def is_live(self) -> bool: ...
     async def watch(self, symbol: str) -> None: ...
     def unwatch(self, symbol: str) -> None: ...
     def snapshot(self) -> dict[str, Any]: ...
@@ -128,9 +129,12 @@ def _num(value: float | None) -> float | None:
 class BrokerManager:
     """真实 IBKR 连接管理。"""
 
-    def __init__(self, settings: IBKRSettings, panel: PanelConfig) -> None:
+    def __init__(
+        self, settings: IBKRSettings, panel: PanelConfig, *, env_warning: str | None = None
+    ) -> None:
         self._settings = settings
         self._market_data_type = panel.market_data_type
+        self._env_warning = env_warning  # live 互锁回退等提示，前端醒目展示
         self._ib: IB | None = None
         self._adapter: IbBrokerAdapter | None = None
         self._watchlist: list[str] = []  # 保持添加顺序
@@ -149,6 +153,9 @@ class BrokerManager:
 
     def is_connected(self) -> bool:
         return self._ib is not None and self._ib.isConnected()
+
+    def is_live(self) -> bool:
+        return self._settings.environment is Environment.LIVE
 
     async def connect(self) -> None:
         """连接 Gateway（按环境选 paper/live），并重订阅 watchlist。"""
@@ -280,6 +287,8 @@ class BrokerManager:
         return {
             "connected": connected,
             "environment": self._settings.environment.value,
+            "is_live": self.is_live(),
+            "env_warning": self._env_warning,
             "market_data_type": self._market_data_type,
             "error": self._last_error,
             "account": account,

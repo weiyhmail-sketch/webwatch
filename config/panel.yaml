@@ -32,6 +32,8 @@ risk:
   pdt_min_nav: 25000
   # 账户数据不可用（账户级风控失效）时，超过此金额的单直接拒；之下仅告警。盲飞封小额。
   account_unavailable_max_notional_usd: 1000
+  # live 首周单笔 notional 上限（仅 live 生效）。验证期压规模，稳定后再放宽。
+  live_max_order_notional_usd: 20000
 
 commission:
   per_share_usd: 0.0035       # IBKR Pro Tiered 假设（与 scalper 一致）

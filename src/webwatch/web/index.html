@@ -40,6 +40,11 @@
   .err { color:var(--amber); font-size:12px; }
   .x { color:var(--muted); cursor:pointer; }
   .empty { color:var(--muted); padding:8px; }
+  #livebar { display:none; padding:8px 16px; font-weight:700; text-align:center; }
+  #livebar.live { display:block; background:var(--red); color:#fff;
+                  letter-spacing:1px; animation:pulse 1.5s infinite; }
+  #livebar.warn { display:block; background:var(--amber); color:#1a1a1a; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
   .orderform { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .orderform label { color:var(--muted); display:flex; align-items:center; gap:4px; }
   .orderform select { background:#0f1419; border:1px solid var(--line); color:var(--txt);
@@ -60,6 +65,7 @@
   <button id="flattenBtn" style="background:var(--red)" title="f">市价全平</button>
   <button class="ghost" id="reconnect">重连</button>
 </header>
+<div id="livebar"></div>
 
 <main>
   <section class="card full">
@@ -127,6 +133,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+let isLive = false;  // 由 render() 根据 state 更新；下单确认用
 const fmt = (v, d=2) => (v === null || v === undefined) ? '<span class="mut">—</span>' : Number(v).toFixed(d);
 const money = (v) => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
 const sideCls = (s) => s === 'long' ? 'pos' : 'neg';
@@ -138,6 +145,12 @@ function render(st) {
   env.className = 'badge ' + (st.environment === 'live' ? 'live' : 'paper');
   $('dot').className = 'dot ' + (st.connected ? 'on' : 'off');
   $('conn').textContent = st.connected ? '已连接' : '未连接';
+  // LIVE 醒目横幅 / 互锁回退警告
+  isLive = !!st.is_live;
+  const bar = $('livebar');
+  if (isLive) { bar.className = 'live'; bar.textContent = '🔴 LIVE 实盘 — 真金白银，每笔下单都会用真实资金成交'; }
+  else if (st.env_warning) { bar.className = 'warn'; bar.textContent = '⚠ ' + st.env_warning; }
+  else { bar.className = ''; bar.textContent = ''; }
   $('err').textContent = st.error ? ('⚠ ' + st.error) : '';
   const mdt = {1:'实时',2:'冻结',3:'延迟',4:'延迟冻结'}[st.market_data_type] || st.market_data_type;
   $('mdtype').textContent = '行情:' + mdt;
@@ -232,7 +245,8 @@ async function buyLimit() {
   const pr = await postOrder('/api/order/preview');
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
-  let msg = `确认限价买入 ${p.symbol} ${p.quantity} 股 @ ${p.entry_limit}\n止盈 ${p.take_profit} / 止损 ${p.stop_loss}\n扣费净盈亏 ${p.net_pnl}`;
+  let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
+    `确认限价买入 ${p.symbol} ${p.quantity} 股 @ ${p.entry_limit}\n止盈 ${p.take_profit} / 止损 ${p.stop_loss}\n扣费净盈亏 ${p.net_pnl}`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
   showOrderResult(await postOrder('/api/order/limit'), true);
@@ -282,7 +296,8 @@ async function buyMarket() {
   const pr = await postMarket('/api/order/market/preview');
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
-  let msg = `确认【市价买入】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n` +
+  let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
+    `确认【市价买入】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n` +
     `成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;

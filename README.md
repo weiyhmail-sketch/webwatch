@@ -35,7 +35,7 @@ uv run uvicorn webwatch.app:app --reload
 - [x] M3 限价买入 + 原生 bracket（paper 实测三单同发）
 - [x] M4 市价买入 + 成交后精确挂 + 保护单失败立即平仓（活盘验证待 M6）
 - [x] M5 风控 + 撤单/全平 + 热键（80 单测全绿）
-- [ ] M6 paper 验证 1–2 天
-- [ ] M7 切 live 闸门
+- [ ] M6 paper 验证 1–2 天（待盘中实操）
+- [x] M7 切 live 闸门（二重互锁 + 红色醒目标识 + 首周上限 + 每笔确认，106 单测全绿）
 
 开发约定见 [CLAUDE.md](CLAUDE.md)。

@@ -69,6 +69,36 @@ class IBKRSettings(BaseSettings):
         }
 
 
+class RuntimeEnv(BaseSettings):
+    """运行时环境选择（M7 live 二重互锁）。仅从环境变量读，不进 secrets 文件。"""
+
+    model_config = SettingsConfigDict(
+        env_prefix="WEBWATCH_", extra="ignore", case_sensitive=False
+    )
+
+    env: str = "paper"  # WEBWATCH_ENV：paper | live
+    live_confirm: str = ""  # WEBWATCH_LIVE_CONFIRM：必须 =YES 才允许 live
+
+
+def resolve_environment() -> tuple[Environment, str | None]:
+    """解析有效运行环境，带 live 二重互锁。
+
+    要进 live 必须同时 ``WEBWATCH_ENV=live`` 且 ``WEBWATCH_LIVE_CONFIRM=YES``；
+    任一缺失则**回退 paper**（安全方向）并返回警告字串供前端醒目展示。
+    返回 ``(有效环境, 警告或 None)``。
+    """
+    r = RuntimeEnv()
+    requested = (r.env or "paper").strip().lower()
+    if requested == "live":
+        if r.live_confirm.strip().upper() == "YES":
+            return Environment.LIVE, None
+        return (
+            Environment.PAPER,
+            "请求 WEBWATCH_ENV=live 但未设 WEBWATCH_LIVE_CONFIRM=YES → 已回退 paper（live 二重互锁）",
+        )
+    return Environment.PAPER, None
+
+
 def secrets_path(environment: Environment, config_dir: Path = CONFIG_DIR) -> Path:
     """该环境对应的 secrets 文件路径。"""
     return config_dir / f"secrets.{environment.value}.env"
@@ -134,6 +164,10 @@ class PanelConfig:
         # 之下仅 WARN。盲飞时把规模封死在小额，保护真金白银。
         self.account_unavailable_max_notional_usd = Decimal(
             str(risk.get("account_unavailable_max_notional_usd", "1000"))
+        )
+        # live 首周单笔 notional 上限（仅 live 生效）。验证期把规模压住，稳定后再放宽。
+        self.live_max_order_notional_usd = Decimal(
+            str(risk.get("live_max_order_notional_usd", "20000"))
         )
         comm = raw.get("commission", {}) or {}
         self.commission_per_share_usd = Decimal(str(comm.get("per_share_usd", "0.0035")))

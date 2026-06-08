@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from scalper.strategy.base import Side
 
 from webwatch.broker import BrokerLike, BrokerManager, EntryUncertain, ProtectionFailed
-from webwatch.config import Environment, PanelConfig, load_panel_config, load_settings
+from webwatch.config import PanelConfig, load_panel_config, load_settings, resolve_environment
 from webwatch.order_service import (
     MarketOrderPlan,
     OrderRejected,
@@ -104,6 +104,19 @@ def _risk_for(
         buying_power=buying_power,
         panel=panel,
     )
+    # live 首周单笔 notional 上限（仅 live 生效）——把验证期规模封住。
+    if broker_.is_live():
+        notional = entry * quantity
+        if notional > panel.live_max_order_notional_usd:
+            findings = [
+                RiskFinding(
+                    "live_order_cap",
+                    BLOCK,
+                    f"LIVE 首周单笔上限 ${panel.live_max_order_notional_usd}，"
+                    f"本单 ${notional} 超限，已拒单",
+                ),
+                *findings,
+            ]
     # 已连接但读不到账户数据 → 账户级风控（最大亏损/购买力）失效。
     # fail-closed：超过"盲飞上限"的单直接 BLOCK；之下仅 WARN。
     if broker_.is_connected() and nav is None:
@@ -203,9 +216,13 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         panel = load_panel_config()
-        b: BrokerLike = broker if broker is not None else BrokerManager(
-            load_settings(Environment.PAPER), panel
-        )
+        if broker is not None:
+            b: BrokerLike = broker
+        else:
+            eff_env, env_warning = resolve_environment()  # live 二重互锁
+            if eff_env.value == "live":
+                log.warning("⚠️ 启动于 LIVE 实盘环境（端口 4001）")
+            b = BrokerManager(load_settings(eff_env), panel, env_warning=env_warning)
         app.state.broker = b
         app.state.panel = panel
         if auto_connect:

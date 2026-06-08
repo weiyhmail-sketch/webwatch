@@ -8,9 +8,11 @@ from typing import Any
 from fastapi.testclient import TestClient
 from scalper.strategy.base import Side
 
-from webwatch.app import create_app
+from webwatch.app import _risk_for, create_app
 from webwatch.broker import ProtectionFailed
+from webwatch.config import PanelConfig
 from webwatch.pricing import Target
+from webwatch.risk import BLOCK
 
 
 class FakeBroker:
@@ -22,8 +24,10 @@ class FakeBroker:
         protection_fails: bool = False,
         nav: Decimal | None = Decimal("1000000"),
         buying_power: Decimal | None = Decimal("4000000"),
+        live: bool = False,
     ) -> None:
         self.connected = True
+        self.live = live
         self.watchlist: list[str] = []
         self.placed: list[dict[str, Any]] = []
         self.market_orders: list[dict[str, Any]] = []
@@ -52,6 +56,9 @@ class FakeBroker:
 
     def is_connected(self) -> bool:
         return self.connected
+
+    def is_live(self) -> bool:
+        return self.live
 
     async def watch(self, symbol: str) -> None:
         s = symbol.strip().upper()
@@ -312,6 +319,19 @@ def test_account_unavailable_warns_small_order() -> None:
         assert body["rejected"] is False
         assert any(f["code"] == "account_unavailable" for f in body["risk"])
         assert len(fake.placed) == 1
+
+
+def test_live_order_cap_blocks_oversized() -> None:
+    # live 下单笔 notional 超 live 上限(默认 20000) → BLOCK
+    fake = FakeBroker(live=True)
+    findings = _risk_for(fake, Decimal("300"), Decimal("299"), 100, Side.LONG, PanelConfig({}))
+    assert any(f.code == "live_order_cap" and f.severity == BLOCK for f in findings)
+
+
+def test_paper_has_no_live_cap() -> None:
+    fake = FakeBroker(live=False)
+    findings = _risk_for(fake, Decimal("300"), Decimal("299"), 100, Side.LONG, PanelConfig({}))
+    assert not any(f.code == "live_order_cap" for f in findings)
 
 
 def test_cancel_all_endpoint() -> None:

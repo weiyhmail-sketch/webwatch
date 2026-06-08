@@ -26,8 +26,8 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 | M3 | 限价买入 + 模式B 原生 bracket（`ib.bracketOrder`）| ✅ 完成，55 单测 + paper 实测三单同发 |
 | M4 | 市价买入 + 模式A 成交后精确挂（OCA 兄弟单）| ✅ 代码完成，66 单测（含保护失败→平仓）；活盘 fill 待 M6 验证 |
 | M5 | 风控 + 撤单/全平 + 热键 | ✅ 完成，80 单测全绿 |
-| M6 | paper 验证 1–2 天 | ⏳ 未开始 |
-| M7 | 切 live 闸门（双重确认 + 醒目标识 + 首周小手数）| ⏳ 未开始 |
+| M6 | paper 验证 1–2 天 | ⏳ 待用户盘中实操（需行情权限）|
+| M7 | 切 live 闸门（二重互锁 + 醒目标识 + 首周上限 + 每笔确认）| ✅ 代码完成，106 单测；实际切 live 待 M6 通过 + 用户批准 |
 
 ---
 
@@ -47,7 +47,20 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 - [ ] 4. 真实做空保证金（risk 空头购买力当前按 entry×qty 估）——**UI 当前只做多(买入)，低优先**。
 - [ ] 5. `_cancel_trades`→`_emergency_flatten` 窄竞态：平后对账兜（极窄窗口，留 live 前）。
 - [ ] 6. EntryUncertain 路径自动对账平仓（当前靠用户手动查，已醒目提示）。
-- [ ] **M7 红线 #1 live 切换**：双确认 + 醒目标识 + 首周小手数（需用户拍板机制设计）。
+- [x] **M7 红线 #1 live 切换**（已实现）：
+  - 进 live 二重互锁：`WEBWATCH_ENV=live` **且** `WEBWATCH_LIVE_CONFIRM=YES`，缺一回退 paper（已实测）。
+  - live 醒目标识：顶部红色脉冲横幅 + env 徽章红；互锁回退时琥珀色警告条。
+  - live 首周单笔上限：`live_max_order_notional_usd`（默认 $20000，仅 live 生效，超限拒单）。
+  - live 每笔下单 confirm 弹窗加 "🔴 LIVE 实盘" 前缀。
+  - ⚠️ **配置注意**：当前 `max_order_notional_usd=5000` < live 上限 20000，**5000 才是实际生效的更小约束**；
+    要让 20000 live 上限成为绑定约束，需同时把 `max_order_notional_usd` 调到 ≥20000。
+
+### 如何切 live（M6 paper 验证通过 + 用户明确批准后）
+```bash
+cp config/secrets.env.example config/secrets.live.env   # 填 live 账户号(U 开头)，端口 4001
+WEBWATCH_ENV=live WEBWATCH_LIVE_CONFIRM=YES uv run uvicorn webwatch.app:app
+```
+缺 `WEBWATCH_LIVE_CONFIRM=YES` 会自动回退 paper（安全）。
 
 硬化后 **98 单测全绿**，mypy --strict + ruff 通过。
 
