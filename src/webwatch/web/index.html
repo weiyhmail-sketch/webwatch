@@ -77,19 +77,19 @@
       <input id="oEntry" type="number" step="0.01" placeholder="限价/市价参考价" style="width:130px" />
       <label>止盈
         <select id="oTpKind">
-          <option value="pct">%</option>
+          <option value="pct">%(如0.2=0.2%)</option>
           <option value="price_offset">+$/股</option>
           <option value="profit_usd">盈利$</option>
         </select>
-        <input id="oTpVal" value="0.002" />
+        <input id="oTpVal" value="0.2" />
       </label>
       <label>止损
         <select id="oSlKind">
-          <option value="pct">%</option>
+          <option value="pct">%(如0.4=0.4%)</option>
           <option value="price_offset">-$/股</option>
           <option value="profit_usd">亏损$</option>
         </select>
-        <input id="oSlVal" value="0.004" />
+        <input id="oSlVal" value="0.4" />
       </label>
       <button id="previewBtn" class="ghost">预览</button>
       <button id="buyBtn">限价买入</button>
@@ -234,12 +234,18 @@ $('mdtype').addEventListener('change', async (e) => {
 });
 
 // --- 下单 ---
+// % 模式下用户输入百分数(0.2=0.2%)，后端要小数(0.002)，这里 ÷100 转换。
+function tgtVal(kindId, valId) {
+  const k = $(kindId).value, v = $(valId).value;
+  if (k === 'pct' && v.trim() !== '' && !isNaN(Number(v))) return String(Number(v) / 100);
+  return v;
+}
 function orderBody() {
   return {
     symbol: $('oSym').value, quantity: Number($('oQty').value),
     entry_limit: $('oEntry').value,
-    tp_kind: $('oTpKind').value, tp_value: $('oTpVal').value,
-    sl_kind: $('oSlKind').value, sl_value: $('oSlVal').value, side: 'long',
+    tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind', 'oTpVal'),
+    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind', 'oSlVal'), side: 'long',
   };
 }
 async function postOrder(path) {
@@ -282,8 +288,8 @@ function marketBody() {
   return {
     symbol: $('oSym').value, quantity: Number($('oQty').value),
     ref_price: $('oEntry').value,
-    tp_kind: $('oTpKind').value, tp_value: $('oTpVal').value,
-    sl_kind: $('oSlKind').value, sl_value: $('oSlVal').value, side: 'long',
+    tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind', 'oTpVal'),
+    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind', 'oSlVal'), side: 'long',
   };
 }
 async function postMarket(path) {
