@@ -225,6 +225,42 @@ def net_edge(
     )
 
 
+def aggressive_limit(ref_price: Decimal, ticks: int, *, side: Side = Side.LONG) -> Decimal:
+    """时段外把"市价"转成激进限价：买单贴卖一价上方 ``ticks`` 个 tick（卖单则下方）。
+
+    时段外 IBKR 不收市价单；激进限价用略优于对手价的价格追求成交。
+    """
+    if not ref_price.is_finite() or ref_price <= 0:
+        raise ValueError(f"ref_price must be positive finite, got {ref_price}")
+    if ticks < 0:
+        raise ValueError(f"ticks must be >= 0, got {ticks}")
+    tick = min_tick(ref_price)
+    offset = tick * ticks
+    if side is Side.LONG:
+        return round_to_tick(ref_price + offset, tick, ROUND_UP)
+    return round_to_tick(ref_price - offset, tick, ROUND_DOWN)
+
+
+def stop_limit_price(stop_price: Decimal, offset_pct: Decimal, *, side: Side = Side.LONG) -> Decimal:
+    """止损限价单的保护限价：在止损触发价更"深"一侧留 ``offset_pct`` 缓冲，
+    以便价格穿过触发价时仍能成交（代价：极端跳空可能不成交）。
+
+    LONG 仓的止损是 SELL stop → 限价在触发价**下方**；SHORT 反之。
+    """
+    if not stop_price.is_finite() or stop_price <= 0:
+        raise ValueError(f"stop_price must be positive finite, got {stop_price}")
+    if not offset_pct.is_finite() or offset_pct < 0:
+        raise ValueError(f"offset_pct must be >= 0 finite, got {offset_pct}")
+    tick = min_tick(stop_price)
+    if side is Side.LONG:
+        limit = round_to_tick(stop_price * (Decimal(1) - offset_pct), tick, ROUND_DOWN)
+    else:
+        limit = round_to_tick(stop_price * (Decimal(1) + offset_pct), tick, ROUND_UP)
+    if limit <= 0:
+        raise ValueError(f"stop-limit 保护价非正（{limit}）")
+    return limit
+
+
 def shares_for_notional(notional_usd: Decimal, price: Decimal) -> int:
     """给定金额能买的整股数（向下取整）。"""
     if price <= 0:
@@ -242,6 +278,8 @@ __all__ = [
     "target_delta",
     "compute_bracket",
     "net_edge",
+    "aggressive_limit",
+    "stop_limit_price",
     "shares_for_notional",
     "DEFAULT_COMMISSION_PER_SHARE",
     "DEFAULT_MIN_COMMISSION",

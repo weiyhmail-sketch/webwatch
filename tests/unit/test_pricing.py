@@ -11,11 +11,13 @@ from webwatch.pricing import (
     BracketPrices,
     NetEdge,
     Target,
+    aggressive_limit,
     compute_bracket,
     min_tick,
     net_edge,
     round_to_tick,
     shares_for_notional,
+    stop_limit_price,
     target_delta,
 )
 
@@ -202,6 +204,32 @@ class TestNetEdge:
         e = net_edge(Decimal("100"), Decimal("100.20"), 100)
         for val in (e.gross_pnl, e.total_commission, e.total_fees, e.net_pnl, e.net_pnl_per_share):
             assert isinstance(val, Decimal)
+
+
+class TestAggressiveLimit:
+    def test_long_adds_ticks_above_ref(self) -> None:
+        # $100、+3 tick($0.01) → 100.03
+        assert aggressive_limit(Decimal("100"), 3, side=Side.LONG) == Decimal("100.03")
+
+    def test_short_subtracts_ticks(self) -> None:
+        assert aggressive_limit(Decimal("100"), 3, side=Side.SHORT) == Decimal("99.97")
+
+    def test_rejects_nonpositive(self) -> None:
+        with pytest.raises(ValueError):
+            aggressive_limit(Decimal("0"), 3)
+
+
+class TestStopLimitPrice:
+    def test_long_limit_below_stop(self) -> None:
+        # LONG 卖出止损：限价在触发价下方 0.5% → 100*0.995=99.50
+        assert stop_limit_price(Decimal("100"), Decimal("0.005"), side=Side.LONG) == Decimal("99.50")
+
+    def test_short_limit_above_stop(self) -> None:
+        assert stop_limit_price(Decimal("100"), Decimal("0.005"), side=Side.SHORT) == Decimal("100.50")
+
+    def test_rejects_negative_offset(self) -> None:
+        with pytest.raises(ValueError):
+            stop_limit_price(Decimal("100"), Decimal("-0.1"))
 
 
 class TestSharesForNotional:

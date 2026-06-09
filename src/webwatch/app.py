@@ -29,10 +29,11 @@ from webwatch.order_service import (
     plan_market_order,
     plan_to_dict,
 )
-from webwatch.pricing import Target, TargetKind
+from webwatch.pricing import Target, TargetKind, aggressive_limit
 from webwatch.risk import BLOCK, WARN, RiskFinding, finding_to_dict
 from webwatch.risk import assess as risk_assess
 from webwatch.risk import blocks as risk_blocks
+from webwatch.session import is_rth
 
 log = logging.getLogger(__name__)
 
@@ -315,6 +316,7 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
         blocked = _risk_block_response(findings)
         if blocked is not None:
             return blocked
+        outside = panel.extended_hours_enabled and not is_rth()
         try:
             placement = await broker_.place_limit_bracket(
                 symbol=plan.symbol,
@@ -323,6 +325,8 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
                 entry_limit=plan.entry_limit,
                 take_profit=plan.bracket.take_profit,
                 stop_loss=plan.bracket.stop_loss,
+                outside_rth=outside,
+                stop_limit_offset_pct=panel.stop_limit_offset_pct,
             )
         except Exception as exc:  # noqa: BLE001 — 下单失败回报给前端，不崩
             return JSONResponse(
@@ -370,6 +374,50 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
         blocked = _risk_block_response(findings)
         if blocked is not None:
             return blocked
+
+        # 时段外（盘前/盘后/夜盘）：IBKR 不收市价单 → 自动转"激进限价"bracket（stop-limit 止损）。
+        if panel.extended_hours_enabled and not is_rth():
+            try:
+                aggressive = aggressive_limit(
+                    plan.ref_price, panel.aggressive_limit_ticks, side=plan.side
+                )
+                lim = plan_limit_bracket(
+                    symbol=plan.symbol,
+                    quantity=plan.quantity,
+                    entry_limit=aggressive,
+                    take_profit=plan.take_profit,
+                    stop_loss=plan.stop_loss,
+                    panel=panel,
+                    side=plan.side,
+                )
+            except OrderRejected as exc:
+                return JSONResponse({"rejected": True, "reason": exc.reason}, status_code=400)
+            try:
+                placement = await broker_.place_limit_bracket(
+                    symbol=lim.symbol,
+                    side=lim.side,
+                    quantity=lim.quantity,
+                    entry_limit=lim.entry_limit,
+                    take_profit=lim.bracket.take_profit,
+                    stop_loss=lim.bracket.stop_loss,
+                    outside_rth=True,
+                    stop_limit_offset_pct=panel.stop_limit_offset_pct,
+                )
+            except Exception as exc:  # noqa: BLE001
+                return JSONResponse(
+                    {"rejected": True, "reason": f"下单失败: {exc}"}, status_code=502
+                )
+            return JSONResponse(
+                {
+                    "rejected": False,
+                    "converted_to_limit": True,
+                    "plan": plan_to_dict(lim),
+                    "placement": placement,
+                    "risk": [finding_to_dict(f) for f in findings],
+                }
+            )
+
+        # RTH：真·市价(IOC) + 成交后挂 OCA
         try:
             placement = await broker_.place_market_with_protection(
                 symbol=plan.symbol,

@@ -154,6 +154,12 @@ class PanelConfig:
         # IBKR 行情类型：1=实时(需订阅) 2=冻结 3=延迟 4=延迟冻结。
         # 超短线实盘用 1；无实时订阅时开发可设 3 看延迟报价。
         self.market_data_type = int(raw.get("market_data_type", 1))
+        # 24h 交易：允许盘前/盘后/夜盘下单（outsideRth）。时段外自动用限价入场 + stop-limit 止损。
+        self.extended_hours_enabled = bool(raw.get("extended_hours_enabled", True))
+        # 时段外"市价买入"转激进限价时，贴对手价加的 tick 数。
+        self.aggressive_limit_ticks = int(raw.get("aggressive_limit_ticks", 3))
+        # 时段外 stop-limit 止损：保护限价相对触发价的缓冲（向更深一侧）。
+        self.stop_limit_offset_pct = Decimal(str(raw.get("stop_limit_offset_pct", "0.005")))
         risk = raw.get("risk", {}) or {}
         self.max_order_notional_usd = Decimal(str(risk.get("max_order_notional_usd", "5000")))
         # 单笔最大亏损上限（占 NAV 比例），镜像 scalper 0.5% 语义。

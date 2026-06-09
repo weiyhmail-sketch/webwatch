@@ -22,6 +22,11 @@ bracket_mode: native
 # 超短线实盘必须用 1；若账户暂无实时行情订阅，开发期可设 3 看延迟报价。
 market_data_type: 1
 
+# 24 小时交易：允许盘前/盘后/夜盘下单。时段外自动：限价入场 + stop-limit 止损 + outsideRth。
+extended_hours_enabled: true
+aggressive_limit_ticks: 3        # 时段外"市价买入"转激进限价，贴对手价加的 tick 数
+stop_limit_offset_pct: 0.005     # 时段外 stop-limit 止损：保护限价相对触发价的缓冲
+
 risk:
   # 单笔 notional 上限（下单前风控会拒超限单；paper/live 通用）。
   # 设为 20000 以让下方 live 首周上限($20000)真正成为绑定约束。

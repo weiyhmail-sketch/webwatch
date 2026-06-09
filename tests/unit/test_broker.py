@@ -70,6 +70,7 @@ class FakeIB:
     def __init__(self) -> None:
         self.placed: list[tuple[Any, int]] = []
         self.last_args: tuple[Any, ...] | None = None
+        self.last_bracket: Any = None
 
     def isConnected(self) -> bool:  # noqa: N802 — 匹配 ib_async API
         return True
@@ -81,7 +82,8 @@ class FakeIB:
         self, action: str, qty: float, lp: float, tp: float, sl: float
     ) -> Any:
         self.last_args = (action, qty, lp, tp, sl)
-        return _BO(_FakeOrder(101), _FakeOrder(102), _FakeOrder(103))
+        self.last_bracket = _BO(_FakeOrder(101), _FakeOrder(102), _FakeOrder(103))
+        return self.last_bracket
 
     def placeOrder(self, contract: Any, order: Any) -> Any:  # noqa: N802
         self.placed.append((contract.symbol, order.orderId))
@@ -109,6 +111,31 @@ class TestPlaceLimitBracket:
         assert res["stop_loss_id"] == 103
         # IB 边界转 float，BUY 方向
         assert fake.last_args == ("BUY", 100, 100.0, 100.2, 99.6)
+        assert res["outside_rth"] is False
+        assert res["stop_limit"] is None
+
+    async def test_outside_rth_uses_stop_limit_and_outside_flag(self) -> None:
+        # 时段外：止损转 STP-LMT + 三单全部 outsideRth=True
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        fake = FakeIB()
+        bm._ib = fake  # type: ignore[assignment]
+        res = await bm.place_limit_bracket(
+            symbol="aapl",
+            side=Side.LONG,
+            quantity=100,
+            entry_limit=Decimal("100"),
+            take_profit=Decimal("100.20"),
+            stop_loss=Decimal("99.60"),
+            outside_rth=True,
+            stop_limit_offset_pct=Decimal("0.005"),
+        )
+        assert res["outside_rth"] is True
+        # 99.60 * 0.995 = 99.102 → 向下取整到分位 = 99.10
+        assert res["stop_limit"] == "99.10"
+        b = fake.last_bracket
+        assert all(o.outsideRth for o in b)  # 三条腿都 outsideRth
+        assert b.stopLoss.orderType == "STP LMT"
+        assert b.stopLoss.lmtPrice == 99.10
 
     async def test_raises_when_disconnected(self) -> None:
         bm = BrokerManager(IBKRSettings(), PanelConfig({}))

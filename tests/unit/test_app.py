@@ -85,6 +85,8 @@ class FakeBroker:
         entry_limit: Decimal,
         take_profit: Decimal,
         stop_loss: Decimal,
+        outside_rth: bool = False,
+        stop_limit_offset_pct: Decimal | None = None,
     ) -> dict[str, Any]:
         rec = {
             "symbol": symbol,
@@ -93,6 +95,8 @@ class FakeBroker:
             "entry_limit": str(entry_limit),
             "take_profit": str(take_profit),
             "stop_loss": str(stop_loss),
+            "outside_rth": outside_rth,
+            "stop_limit": "x" if outside_rth else None,
             "parent_id": 1,
             "take_profit_id": 2,
             "stop_loss_id": 3,
@@ -259,7 +263,8 @@ def test_market_preview_ok() -> None:
         assert body["plan"]["preview_take_profit"] == "200.40"
 
 
-def test_market_order_places_with_protection() -> None:
+def test_market_order_places_with_protection(monkeypatch: Any) -> None:
+    monkeypatch.setattr("webwatch.app.is_rth", lambda: True)  # 固定 RTH 走市价路径
     fake = FakeBroker()
     with TestClient(create_app(fake, auto_connect=False)) as c:
         r = c.post("/api/order/market", json=_market_body())
@@ -269,7 +274,8 @@ def test_market_order_places_with_protection() -> None:
         assert len(fake.market_orders) == 1
 
 
-def test_market_order_protection_failed_surfaced() -> None:
+def test_market_order_protection_failed_surfaced(monkeypatch: Any) -> None:
+    monkeypatch.setattr("webwatch.app.is_rth", lambda: True)
     fake = FakeBroker(protection_fails=True)
     with TestClient(create_app(fake, auto_connect=False)) as c:
         r = c.post("/api/order/market", json=_market_body())
@@ -338,6 +344,39 @@ def test_paper_has_no_live_cap() -> None:
     fake = FakeBroker(live=False)
     findings = _risk_for(fake, Decimal("300"), Decimal("299"), 100, Side.LONG, PanelConfig({}))
     assert not any(f.code == "live_order_cap" for f in findings)
+
+
+def test_market_order_outside_rth_converts_to_limit(monkeypatch: Any) -> None:
+    # 时段外：市价买入自动转激进限价 bracket（outside_rth=True）
+    monkeypatch.setattr("webwatch.app.is_rth", lambda: False)
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/market", json=_market_body())
+        body = r.json()
+        assert body["rejected"] is False
+        assert body["converted_to_limit"] is True
+        assert len(fake.placed) == 1  # 走了 place_limit_bracket
+        assert fake.placed[0]["outside_rth"] is True
+        assert len(fake.market_orders) == 0  # 没走真·市价
+
+
+def test_market_order_rth_uses_market_path(monkeypatch: Any) -> None:
+    monkeypatch.setattr("webwatch.app.is_rth", lambda: True)
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/market", json=_market_body())
+        body = r.json()
+        assert body.get("converted_to_limit") is None
+        assert len(fake.market_orders) == 1  # 真·市价路径
+
+
+def test_limit_order_outside_rth_passes_flag(monkeypatch: Any) -> None:
+    monkeypatch.setattr("webwatch.app.is_rth", lambda: False)
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/limit", json=_order_body())
+        assert r.json()["rejected"] is False
+        assert fake.placed[0]["outside_rth"] is True
 
 
 def test_market_data_type_endpoint() -> None:

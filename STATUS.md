@@ -31,6 +31,24 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 
 ---
 
+## M8 — 24 小时交易（盘前/盘后/夜盘）（2026-06-08，按用户要求）
+
+用户要 24h 都能交易。IBKR 硬规则：时段外不收市价单 & 普通 STP 不触发，只收限价 + stop-limit + outsideRth。
+按用户决策实现（完整 24h 含夜盘 / 止损用 stop-limit / 市价转激进限价）：
+- [session.py](src/webwatch/session.py)：纯 stdlib(zoneinfo) 判 ET 时段（RTH/盘前/盘后/夜盘/休市）。
+  不接节假日历——判错只会"不成交"或"用更保守单型"，安全。
+- [pricing.py](src/webwatch/pricing.py)：`aggressive_limit`（市价转激进限价）+ `stop_limit_price`（止损限价缓冲）。
+- [broker.py](src/webwatch/broker.py)::`place_limit_bracket(outside_rth=True)` → 三腿全 `outsideRth=True`，
+  止损从 STP **转 STP-LMT**（复用 ib.bracketOrder 再 mutate）。
+- [app.py](src/webwatch/app.py)：限价单时段外自动带 outsideRth；**市价单时段外自动转激进限价 bracket**
+  （`converted_to_limit`）；snapshot 暴露 `session`/`is_rth`。
+- [前端](src/webwatch/web/index.html)：顶部时段徽章（RTH 绿/时段外琥珀/休市灰）；行情类型下拉；
+  市价 confirm 在时段外提示"将转激进限价 + stop-limit"。
+- config：`extended_hours_enabled`(默认 true)、`aggressive_limit_ticks`(3)、`stop_limit_offset_pct`(0.005)。
+- 17 新测试（session/pricing/broker outside_rth/app 转换）。**131 单测全绿**，mypy --strict + ruff 通过。
+- ⚠️ **caveats**（用户已知）：夜盘仅部分标的可交易、流动性薄点差宽（+0.2% 易被吃）；
+  stop-limit 极端跳空可能不成交；session 不含节假日历。
+
 ## 行情模块重做为独立 quotes.py（2026-06-08，按用户要求）
 
 用户指出不要依赖 scalper 行情代码。**事实确认**：webwatch 从未 import scalper 行情模块

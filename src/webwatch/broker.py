@@ -29,9 +29,10 @@ from scalper.execution.types import OrderId
 from scalper.strategy.base import Side
 
 from webwatch.config import Environment, IBKRSettings, PanelConfig
-from webwatch.pricing import BracketPrices, Target, compute_bracket
+from webwatch.pricing import BracketPrices, Target, compute_bracket, stop_limit_price
 from webwatch.quotes import QuoteService
 from webwatch.serialize import account_to_dict, order_to_dict, position_to_dict
+from webwatch.session import is_rth, session_label
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,8 @@ class BrokerLike(Protocol):
         entry_limit: Decimal,
         take_profit: Decimal,
         stop_loss: Decimal,
+        outside_rth: bool = False,
+        stop_limit_offset_pct: Decimal | None = None,
     ) -> dict[str, Any]: ...
     async def place_market_with_protection(
         self,
@@ -240,6 +243,8 @@ class BrokerManager:
             "environment": self._settings.environment.value,
             "is_live": self.is_live(),
             "env_warning": self._env_warning,
+            "session": session_label(),
+            "is_rth": is_rth(),
             "market_data_type": self._quotes.market_data_type,
             "error": self._last_error,
             "account": account,
@@ -260,11 +265,16 @@ class BrokerManager:
         entry_limit: Decimal,
         take_profit: Decimal,
         stop_loss: Decimal,
+        outside_rth: bool = False,
+        stop_limit_offset_pct: Decimal | None = None,
     ) -> dict[str, Any]:
-        """模式B：用 ib_async 原生 bracket 一次性发出 母单(限价) + 止盈(限价) + 止损(stop)。
+        """模式B：用 ib_async 原生 bracket 一次性发出 母单(限价) + 止盈(限价) + 止损。
 
         三条单经 ib.bracketOrder 自带 parentId + transmit 链，保护单零空窗。
-        ``transmit``：parent/TP=False、SL=True → 全部一起 transmit。
+
+        ``outside_rth=True``（盘前/盘后/夜盘）：三条单全部 `outsideRth=True`，且止损从普通 STP
+        **转成 STP-LMT**（时段外普通 stop 不触发）。止损限价用 ``stop_limit_offset_pct`` 在触发价
+        更深一侧留缓冲。
         """
         if not self.is_connected() or self._ib is None:
             raise RuntimeError("未连接 Gateway，无法下单")
@@ -281,6 +291,15 @@ class BrokerManager:
                 float(take_profit),
                 float(stop_loss),
             )
+            stop_limit: Decimal | None = None
+            if outside_rth:
+                offset = stop_limit_offset_pct if stop_limit_offset_pct is not None else Decimal("0.005")
+                stop_limit = stop_limit_price(stop_loss, offset, side=side)
+                for order in bracket:
+                    order.outsideRth = True
+                # 普通 STP → STP-LMT（时段外可用）。auxPrice(触发价) 不变，补限价。
+                bracket.stopLoss.orderType = "STP LMT"
+                bracket.stopLoss.lmtPrice = float(stop_limit)
             for order in bracket:
                 ib.placeOrder(contract, order)
             return {
@@ -290,6 +309,8 @@ class BrokerManager:
                 "entry_limit": str(entry_limit),
                 "take_profit": str(take_profit),
                 "stop_loss": str(stop_loss),
+                "stop_limit": str(stop_limit) if stop_limit is not None else None,
+                "outside_rth": outside_rth,
                 "parent_id": bracket.parent.orderId,
                 "take_profit_id": bracket.takeProfit.orderId,
                 "stop_loss_id": bracket.stopLoss.orderId,

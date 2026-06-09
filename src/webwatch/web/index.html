@@ -58,6 +58,7 @@
 <header>
   <span id="env" class="badge paper">PAPER</span>
   <span><span id="dot" class="dot off"></span><span id="conn">未连接</span></span>
+  <span id="session" class="badge" style="background:#2a323d;color:var(--txt)"></span>
   <div class="acct" id="acct"></div>
   <span style="flex:1"></span>
   <span class="err" id="err"></span>
@@ -142,6 +143,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let isLive = false;  // 由 render() 根据 state 更新；下单确认用
+let isRth = true;    // 是否常规盘；时段外市价会转激进限价
+let sessionLabel = '';
 const fmt = (v, d=2) => (v === null || v === undefined) ? '<span class="mut">—</span>' : Number(v).toFixed(d);
 const money = (v) => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
 const sideCls = (s) => s === 'long' ? 'pos' : 'neg';
@@ -161,6 +164,13 @@ function render(st) {
   else { bar.className = ''; bar.textContent = ''; }
   $('err').textContent = st.error ? ('⚠ ' + st.error) : '';
   if (document.activeElement !== $('mdtype')) $('mdtype').value = String(st.market_data_type || 1);
+  // 交易时段
+  isRth = !!st.is_rth;
+  sessionLabel = st.session || '';
+  const sEl = $('session');
+  sEl.textContent = sessionLabel ? ('时段:' + sessionLabel) : '';
+  sEl.style.background = isRth ? 'var(--green)' : (sessionLabel === '休市' ? '#555' : 'var(--amber)');
+  sEl.style.color = isRth ? '#fff' : (sessionLabel === '休市' ? '#fff' : '#1a1a1a');
 
   // 账户
   const a = st.account;
@@ -300,6 +310,15 @@ function showMarketResult(res) {
   if (res.rejected) { el.innerHTML = `<span class="neg">✕ 拒绝：${res.reason}</span>`; return; }
   const pl = res.placement;
   if (!pl) { el.innerHTML = `<span class="neg">✕ 异常响应，请检查持仓</span>`; return; }
+  // 时段外：市价已转激进限价 bracket（返回限价 bracket 形态）
+  if (res.converted_to_limit) {
+    const p = res.plan;
+    el.innerHTML = `<span class="pos">✓ 时段外已挂激进限价 bracket</span>（市价时段外不可用）—
+      限价 <b>${pl.entry_limit}</b> / 止盈 <b>${pl.take_profit}</b> /
+      止损 <b>${pl.stop_loss}</b>${pl.stop_limit ? ' (stop-limit '+pl.stop_limit+')' : ''}
+      <span class="mut">outsideRth · 单号 ${pl.parent_id}/${pl.take_profit_id}/${pl.stop_loss_id}</span>${riskHtml(res)}`;
+    return;
+  }
   if (pl.filled === 0) { el.innerHTML = `<span class="mut">市价单未成交（${pl.message||''}）</span>`; return; }
   el.innerHTML = `<span class="pos">✓ 市价成交</span> ${pl.filled} 股 @ <b>${pl.fill_price}</b> —
     止盈 <b>${pl.take_profit}</b> / 止损 <b>${pl.stop_loss}</b>
@@ -312,6 +331,7 @@ async function buyMarket() {
   let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
     `确认【市价买入】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n` +
     `成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
+  if (!isRth) msg += `\n\n⏰ 当前为${sessionLabel}（时段外）：市价不可用，将自动转为「激进限价 bracket」，止损用 stop-limit。`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
   showMarketResult(await postMarket('/api/order/market'));
