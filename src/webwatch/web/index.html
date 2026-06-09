@@ -73,6 +73,14 @@
         padding:14px 0;border-radius:10px;}
   .buybtns button.mkt{background:#c9402f;}
   .buybtns button:hover{filter:brightness(1.08);}
+  /* 做空时按钮转绿（红涨绿跌：卖/空=绿） */
+  .buybtns.short button{background:var(--down);}
+  .buybtns.short button.mkt{background:#26823b;}
+  /* 方向切换段控 */
+  .sidetoggle{display:flex;margin:0 0 10px;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .sidetoggle button{flex:1;background:transparent;color:var(--muted);border:none;padding:9px 0;font-size:14px;font-weight:700;cursor:pointer;}
+  .sidetoggle button.act-long{background:var(--up);color:#fff;}
+  .sidetoggle button.act-short{background:var(--down);color:#fff;}
   #previewBtn{width:100%;margin-bottom:8px;}
   .flatbtn{background:var(--down);color:#fff;font-weight:700;padding:7px 14px;}
   .hint{color:var(--muted);font-size:12px;margin-top:8px;}
@@ -110,7 +118,11 @@
 <main>
   <!-- 左：下单交易票（常驻） -->
   <section class="card ticket">
-    <h2>下单 · 买入同时挂止盈止损</h2>
+    <h2 id="ticketTitle">下单 · 买入同时挂止盈止损</h2>
+    <div class="sidetoggle" id="sideToggle">
+      <button data-side="long" class="act-long" title="做多 = 先买后卖">做多 · 买入</button>
+      <button data-side="short" title="做空 = 先卖后买">做空 · 卖空</button>
+    </div>
     <div class="bigq" id="bigq"><div class="ph">← 点右侧报价选择标的，或在下方输入代码</div></div>
 
     <div class="row">
@@ -365,15 +377,33 @@ function tgtVal(kindId, valId) {
   if (k === 'pct' && v.trim() !== '' && !isNaN(Number(v))) return String(Number(v) / 100);
   return v;
 }
+// --- 方向：做多(long)/做空(short)。切换会改按钮文字+配色（红涨绿跌：买=红/卖=绿） ---
+let currentSide = 'long';
+function sideVerb() { return currentSide === 'long' ? '买入' : '卖空'; }
+function applySide() {
+  document.querySelectorAll('#sideToggle button').forEach(b => {
+    const on = b.dataset.side === currentSide;
+    b.classList.toggle('act-long', on && currentSide === 'long');
+    b.classList.toggle('act-short', on && currentSide === 'short');
+  });
+  const verb = sideVerb();
+  $('buyBtn').textContent = verb + ' · 限价';
+  $('buyMktBtn').textContent = verb + ' · 市价';
+  document.querySelector('.buybtns').classList.toggle('short', currentSide === 'short');
+  $('ticketTitle').textContent = '下单 · ' + verb + '同时挂止盈止损';
+}
+document.querySelectorAll('#sideToggle button').forEach(b => b.onclick = () => { currentSide = b.dataset.side; applySide(); });
+applySide();
+
 function orderBody() {
   return { symbol: $('oSym').value, quantity: Number($('oQty').value), entry_limit: $('oEntry').value,
     tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind','oTpVal'),
-    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind','oSlVal'), side: 'long' };
+    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind','oSlVal'), side: currentSide };
 }
 function marketBody() {
   return { symbol: $('oSym').value, quantity: Number($('oQty').value), ref_price: $('oEntry').value,
     tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind','oTpVal'),
-    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind','oSlVal'), side: 'long' };
+    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind','oSlVal'), side: currentSide };
 }
 async function post(path, body) {
   const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
@@ -401,7 +431,7 @@ async function buyLimit() {
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
   let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
-    `确认限价买入 ${p.symbol} ${p.quantity} 股 @ ${p.entry_limit}\n止盈 ${p.take_profit} / 止损 ${p.stop_loss}\n扣费净盈亏 ${p.net_pnl}`;
+    `确认限价${sideVerb()} ${p.symbol} ${p.quantity} 股 @ ${p.entry_limit}\n止盈 ${p.take_profit} / 止损 ${p.stop_loss}\n扣费净盈亏 ${p.net_pnl}`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
   showOrderResult(await post('/api/order/limit', orderBody()), true);
@@ -436,7 +466,7 @@ async function buyMarket() {
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
   let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
-    `确认【市价买入】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
+    `确认【市价${sideVerb()}】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
   if (!isRth) msg += `\n\n⏰ 当前为${sessionLabel}（时段外）：市价不可用，将自动转「激进限价 bracket」，止损用 stop-limit。`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;

@@ -4,7 +4,7 @@
 > 协作约定见 [CLAUDE.md](CLAUDE.md)，完整方案见 plan 文件
 > `~/.claude/plans/ibkr-api-jaunty-sprout.md`。
 
-最后更新：**2026-06-08**（M0–M5 完成；paper 连接+限价 bracket 已实测，市价 fill 待盘中验证）
+最后更新：**2026-06-10**（M0–M8 完成；做空下单已开放、脏代码标的已修；145 单测全绿）
 
 ---
 
@@ -30,6 +30,19 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 | M7 | 切 live 闸门（二重互锁 + 醒目标识 + 首周上限 + 每笔确认）| ✅ 代码完成，106 单测；实际切 live 待 M6 通过 + 用户批准 |
 
 ---
+
+## 做空下单 + 脏代码标的修复（2026-06-10）
+
+- **报价标的删不掉（已修）**：根因是脏字符（引号）混进 watchlist 代码 `A'A'O'I`，前端 ✕ 按钮
+  用内联 `onclick` 字符串拼接被单引号截断。双层修复：① 后端 `quotes.py` 新增 `sanitize_symbol()`
+  在 subscribe/unsubscribe 入口清洗（只留字母/数字/`.`/`-` 转大写）；② 前端报价行改 `data-sym`/`data-x`
+  属性 + `#quotes` 事件委托（不再拼 onclick，任意字符都删得掉、消除注入面）。提交 `81b57d1`。
+- **做空下单（已加）**：后端下单链路（pricing/broker/order_service/app/risk）**早已全程支持 `side`**，
+  仅前端硬编码 `side:'long'`。本次纯前端加 **做多/做空段控**（做多·买入=红 / 做空·卖空=绿，红涨绿跌），
+  切换联动按钮文字+配色+标题；`orderBody/marketBody` 用 `currentSide`；确认框动词随方向变。
+  **补齐 app 端点 SHORT 端到端单测**（limit/market/preview 各一），堵住"UI 开放 SHORT 但后端路径没测"的缺口。
+  paper 实测预览：SHORT entry 50 → 止盈 49.90(下方) / 止损 50.20(上方)，方向正确；LONG 对照正常。
+- **145 单测全绿**，mypy --strict + ruff 通过。
 
 ## UI 重构 + 易用性 + 订单记录（2026-06-09，paper 实测）
 

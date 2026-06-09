@@ -131,6 +131,7 @@ class FakeBroker:
             "filled": quantity,
             "fill_price": "200",
             "symbol": symbol,
+            "side": side.value,
             "take_profit": "200.40",
             "stop_loss": "199.20",
             "oca_group": "scalper-oca-ww-1",
@@ -254,6 +255,30 @@ def test_order_limit_rejected_does_not_place() -> None:
         assert len(fake.placed) == 0  # 风控拒单不下单
 
 
+def test_order_preview_short_inverts_bracket() -> None:
+    # 做空：止盈在入场价下方(50-0.2%=49.90)，止损在上方(50+0.4%=50.20)，方向相反
+    with _client() as c:
+        r = c.post("/api/order/preview", json=_order_body(side="short"))
+        assert r.status_code == 200
+        body = r.json()
+        assert body["rejected"] is False
+        assert body["plan"]["side"] == "short"
+        assert body["plan"]["take_profit"] == "49.90"
+        assert body["plan"]["stop_loss"] == "50.20"
+
+
+def test_order_limit_short_places_sell_bracket() -> None:
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/limit", json=_order_body(side="short"))
+        assert r.status_code == 200
+        assert r.json()["rejected"] is False
+        assert len(fake.placed) == 1
+        assert fake.placed[0]["side"] == "short"
+        assert fake.placed[0]["take_profit"] == "49.90"
+        assert fake.placed[0]["stop_loss"] == "50.20"
+
+
 def _market_body(**kw: Any) -> dict[str, Any]:
     body = {
         "symbol": "aapl",
@@ -286,6 +311,16 @@ def test_market_order_places_with_protection(monkeypatch: Any) -> None:
         assert body["rejected"] is False
         assert body["placement"]["filled"] == 10
         assert len(fake.market_orders) == 1
+
+
+def test_market_order_short_passes_side(monkeypatch: Any) -> None:
+    monkeypatch.setattr("webwatch.app.is_rth", lambda: True)  # 固定 RTH 走市价路径
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/market", json=_market_body(side="short"))
+        assert r.json()["rejected"] is False
+        assert len(fake.market_orders) == 1
+        assert fake.market_orders[0]["side"] == "short"
 
 
 def test_market_order_protection_failed_surfaced(monkeypatch: Any) -> None:
