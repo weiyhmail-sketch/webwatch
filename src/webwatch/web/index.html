@@ -257,11 +257,11 @@ function render(st) {
     const cls = chgCls(chg);
     const tag = r.data_type ? `<span class="mut" style="font-size:10px"> ${r.data_type}</span>` : '';
     const selCls = r.symbol === selectedSymbol ? ' sel' : '';
-    return `<tr class="q${selCls}" onclick="selectSym('${r.symbol}')">
+    return `<tr class="q${selCls}" data-sym="${r.symbol}">
       <td>${r.symbol}${tag}</td><td class="${cls}">${fmt(r.last)}</td>
       <td class="${cls}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td>
       <td>${fmt(r.bid)}</td><td>${fmt(r.ask)}</td>
-      <td class="x" onclick="event.stopPropagation();unwatch('${r.symbol}')">✕</td></tr>`;
+      <td class="x" data-x="${r.symbol}">✕</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">还没有关注的标的</td></tr>';
 
   // 持仓
@@ -327,8 +327,19 @@ function selectSym(sym) {
 $('oSym').addEventListener('input', () => { selectedSymbol = $('oSym').value.trim().toUpperCase(); if (lastState) renderBigQuote(lastState); });
 document.querySelectorAll('.qtybtns button').forEach(b => b.onclick = () => { $('oQty').value = b.dataset.q; });
 
+// 报价表事件委托：删除/选中走 data 属性，不在 HTML 里拼 onclick 字符串（杜绝特殊字符把按钮搞坏 + 防注入）
+$('quotes').addEventListener('click', (e) => {
+  const x = e.target.closest('[data-x]');
+  if (x) { unwatch(x.getAttribute('data-x')); return; }
+  const row = e.target.closest('tr[data-sym]');
+  if (row) selectSym(row.getAttribute('data-sym'));
+});
+
+// 清洗代码：只留字母/数字/.- 转大写，与后端 sanitize_symbol 一致
+function sanitizeSym(s) { return (s || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, ''); }
+
 async function addWatch() {
-  const sym = $('symInput').value.trim();
+  const sym = sanitizeSym($('symInput').value.trim());
   if (!sym) return;
   $('symInput').value = '';
   const r = await fetch('/api/watch', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({symbol: sym})});

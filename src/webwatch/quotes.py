@@ -29,6 +29,11 @@ _DELAYED_TYPES = frozenset({3, 4})
 _VALID_TYPES = frozenset({1, 2, 3, 4})
 
 
+def sanitize_symbol(symbol: str) -> str:
+    """清洗代码：只保留字母/数字/`.`/`-`，转大写。杜绝引号/空格等脏字符进 watchlist。"""
+    return "".join(c for c in symbol.strip().upper() if c.isalnum() or c in ".-")
+
+
 def _num(value: float | None) -> float | None:
     """ib_async ticker 的 nan/None → None（JSON / 前端友好）。"""
     if value is None:
@@ -72,7 +77,7 @@ class QuoteService:
     # ---- 订阅管理 -------------------------------------------------------
 
     async def subscribe(self, symbol: str) -> None:
-        sym = symbol.strip().upper()
+        sym = sanitize_symbol(symbol)
         if not sym:
             return
         if sym not in self._watchlist:
@@ -92,7 +97,7 @@ class QuoteService:
             log.warning("subscribe %s failed: %s: %s", sym, type(exc).__name__, exc)
 
     def unsubscribe(self, symbol: str) -> None:
-        sym = symbol.strip().upper()
+        sym = sanitize_symbol(symbol)
         if sym in self._watchlist:
             self._watchlist.remove(sym)
         contract = self._contracts.pop(sym, None)
@@ -176,4 +181,4 @@ class QuoteService:
         }
 
 
-__all__ = ["QuoteService", "MARKET_DATA_TYPE_NAMES"]
+__all__ = ["QuoteService", "MARKET_DATA_TYPE_NAMES", "sanitize_symbol"]

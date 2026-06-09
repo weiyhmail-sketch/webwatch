@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from webwatch.quotes import QuoteService
+from webwatch.quotes import QuoteService, sanitize_symbol
 
 
 class FakeTicker:
@@ -78,6 +78,33 @@ class TestSubscribe:
         qs.unsubscribe("tsla")
         assert qs.watchlist() == []
         assert ib.cancelled == ["TSLA"]
+
+
+class TestSanitizeSymbol:
+    def test_strips_quotes_and_spaces(self) -> None:
+        # 旧 bug：watchlist 混入 `A'A'O'I` 导致前端 onclick 拼接坏掉、删不掉
+        assert sanitize_symbol(" a'a'o'i ") == "AAOI"
+
+    def test_keeps_dot_and_dash(self) -> None:
+        assert sanitize_symbol("brk.b") == "BRK.B"
+        assert sanitize_symbol("rds-a") == "RDS-A"
+
+    def test_all_dirty_returns_empty(self) -> None:
+        assert sanitize_symbol("''' ") == ""
+
+
+class TestSubscribeSanitizes:
+    async def test_dirty_symbol_stored_clean(self) -> None:
+        qs = QuoteService()
+        qs.attach(FakeIBQ())
+        await qs.subscribe("a'a'o'i")
+        assert qs.watchlist() == ["AAOI"]
+
+    async def test_empty_after_sanitize_not_added(self) -> None:
+        qs = QuoteService()
+        qs.attach(FakeIBQ())
+        await qs.subscribe("'''")
+        assert qs.watchlist() == []
 
 
 class TestMarketDataType:
