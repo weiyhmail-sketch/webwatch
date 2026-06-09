@@ -300,6 +300,9 @@ class BrokerManager:
                 # 普通 STP → STP-LMT（时段外可用）。auxPrice(触发价) 不变，补限价。
                 bracket.stopLoss.orderType = "STP LMT"
                 bracket.stopLoss.lmtPrice = float(stop_limit)
+                # 候选-3：保护腿用 GTC，避免 DAY 单在 session 边界(如 20:00/夜盘跨界)过期 → 裸仓。
+                bracket.takeProfit.tif = "GTC"
+                bracket.stopLoss.tif = "GTC"
             for order in bracket:
                 ib.placeOrder(contract, order)
             return {

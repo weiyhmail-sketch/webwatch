@@ -136,6 +136,9 @@ class TestPlaceLimitBracket:
         assert all(o.outsideRth for o in b)  # 三条腿都 outsideRth
         assert b.stopLoss.orderType == "STP LMT"
         assert b.stopLoss.lmtPrice == 99.10
+        # 候选-3：保护腿用 GTC，避免 session 边界过期裸仓
+        assert b.takeProfit.tif == "GTC"
+        assert b.stopLoss.tif == "GTC"
 
     async def test_raises_when_disconnected(self) -> None:
         bm = BrokerManager(IBKRSettings(), PanelConfig({}))

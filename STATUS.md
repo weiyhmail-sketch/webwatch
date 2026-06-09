@@ -31,6 +31,21 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 
 ---
 
+## M8 复核（PARTIAL，无 P0）→ 已修（2026-06-09）
+
+复核方判 **PARTIAL，无 P0**。候选-2（STP→STP-LMT mutate，本轮最高危）经复核方**实测与原生
+StopLimitOrder 字段逐一相同**、IBKR 能正确识别 → 非 bug。已修复其余：
+- **独立-H（P1，进 paper 前必修）**：app 只判 is_rth、不拦 CLOSED → 周末单挂成 resting 过周末。
+  已接 `is_tradable_extended()`：休市（周末/全休市）**拒单**（app `_closed_response`）。
+- **候选-3（开夜盘前必结）**：时段外保护腿用 DAY tif，跨 session 边界过期→裸仓。已改 **GTC**
+  （broker：outside_rth 时 TP/SL tif=GTC）。夜盘 SMART 路由能否到 Blue Ocean **仍需盘中实测**
+  （路由失败=不成交，安全降级；GTC 已消除边界过期裸仓）。
+- **候选-1 + 独立-I（切 live 前）**：市价转激进限价后，**按实际下单价(aggressive)重跑风控**+block，
+  使"被风控价=被下单价"；响应 risk findings 也用 aggressive。
+- 候选-4（节假日历）：按复核方建议 paper 阶段暂不做（判错只是"市价可点不成交"，安全）。
+- **133 单测全绿**（+CLOSED 拒单/GTC 断言），mypy --strict + ruff 通过。
+- 复核结论：**可进 paper 盘中（RTH+盘前盘后）验证**；夜盘 routing 与候选-1 在切 live 前再确认。
+
 ## M8 — 24 小时交易（盘前/盘后/夜盘）（2026-06-08，按用户要求）
 
 用户要 24h 都能交易。IBKR 硬规则：时段外不收市价单 & 普通 STP 不触发，只收限价 + stop-limit + outsideRth。

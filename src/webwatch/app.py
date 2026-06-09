@@ -33,7 +33,7 @@ from webwatch.pricing import Target, TargetKind, aggressive_limit
 from webwatch.risk import BLOCK, WARN, RiskFinding, finding_to_dict
 from webwatch.risk import assess as risk_assess
 from webwatch.risk import blocks as risk_blocks
-from webwatch.session import is_rth
+from webwatch.session import is_rth, is_tradable_extended
 
 log = logging.getLogger(__name__)
 
@@ -141,6 +141,16 @@ def _risk_for(
             )
         findings = [extra, *findings]
     return findings
+
+
+def _closed_response() -> JSONResponse | None:
+    """休市（周末/全休市）时拒单，避免挂出 resting 过周末、下个交易日陈旧价成交。"""
+    if not is_tradable_extended():
+        return JSONResponse(
+            {"rejected": True, "reason": "当前休市（周末/全休市），不接单。"},
+            status_code=400,
+        )
+    return None
 
 
 def _risk_block_response(findings: Any) -> JSONResponse | None:
@@ -306,6 +316,9 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
     async def order_limit(request: Request, body: LimitOrderRequest) -> JSONResponse:
         broker_: BrokerLike = request.app.state.broker
         panel: PanelConfig = request.app.state.panel
+        closed = _closed_response()
+        if closed is not None:
+            return closed
         try:
             plan = _plan_from_request(body, panel)
         except OrderRejected as exc:
@@ -364,6 +377,9 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
     async def order_market(request: Request, body: MarketOrderRequest) -> JSONResponse:
         broker_: BrokerLike = request.app.state.broker
         panel: PanelConfig = request.app.state.panel
+        closed = _closed_response()
+        if closed is not None:
+            return closed
         try:
             plan = _market_plan_from_request(body, panel)
         except OrderRejected as exc:
@@ -392,6 +408,13 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
                 )
             except OrderRejected as exc:
                 return JSONResponse({"rejected": True, "reason": exc.reason}, status_code=400)
+            # 候选-1：按"实际下单价"(aggressive)重跑风控，使被风控价=被下单价。
+            findings = _risk_for(
+                broker_, lim.entry_limit, lim.bracket.stop_loss, lim.quantity, lim.side, panel
+            )
+            blocked = _risk_block_response(findings)
+            if blocked is not None:
+                return blocked
             try:
                 placement = await broker_.place_limit_bracket(
                     symbol=lim.symbol,

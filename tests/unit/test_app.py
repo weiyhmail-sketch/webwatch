@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from scalper.strategy.base import Side
 
@@ -146,6 +147,13 @@ class FakeBroker:
                        for s in self.watchlist],
             "watchlist": list(self.watchlist),
         }
+
+
+@pytest.fixture(autouse=True)
+def _tradable(monkeypatch: Any) -> None:
+    """默认把"当前可交易"固定为 True，使下单测试不受真实时钟(周末)影响。
+    需要测休市的用例自行覆盖。"""
+    monkeypatch.setattr("webwatch.app.is_tradable_extended", lambda: True)
 
 
 def _client() -> TestClient:
@@ -377,6 +385,26 @@ def test_limit_order_outside_rth_passes_flag(monkeypatch: Any) -> None:
         r = c.post("/api/order/limit", json=_order_body())
         assert r.json()["rejected"] is False
         assert fake.placed[0]["outside_rth"] is True
+
+
+def test_closed_session_rejects_limit(monkeypatch: Any) -> None:
+    # 休市（周末）→ 拒单，不挂 resting 过周末
+    monkeypatch.setattr("webwatch.app.is_tradable_extended", lambda: False)
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/limit", json=_order_body())
+        assert r.status_code == 400
+        assert "休市" in r.json()["reason"]
+        assert len(fake.placed) == 0
+
+
+def test_closed_session_rejects_market(monkeypatch: Any) -> None:
+    monkeypatch.setattr("webwatch.app.is_tradable_extended", lambda: False)
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/market", json=_market_body())
+        assert r.status_code == 400
+        assert len(fake.placed) == 0 and len(fake.market_orders) == 0
 
 
 def test_market_data_type_endpoint() -> None:
