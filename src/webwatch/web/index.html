@@ -237,11 +237,15 @@ function render(st) {
   sEl.style.color = (isRth || sessionLabel === '休市') ? '#fff' : '#1a1a1a';
 
   const a = st.account;
+  const pnl = st.pnl;
+  const pnlHtml = pnl ? `
+    <span>今日盈亏 <b class="${chgCls(pnl.daily)}">${pnl.daily==null?'—':money(pnl.daily)}</b></span>
+    <span class="mut" style="font-size:12px;">已实现 ${pnl.realized==null?'—':money(pnl.realized)} · 浮动 ${pnl.unrealized==null?'—':money(pnl.unrealized)}</span>` : '';
   $('acct').innerHTML = a ? `
     <span>账户 <b>${a.account}</b></span>
     <span>净值 <b>${money(a.net_liquidation)}</b></span>
     <span>现金 <b>${money(a.total_cash_value)}</b></span>
-    <span>购买力 <b>${money(a.buying_power)}</b></span>` : '<span class="mut">账户数据不可用</span>';
+    <span>购买力 <b>${money(a.buying_power)}</b></span>${pnlHtml}` : '<span class="mut">账户数据不可用</span>';
 
   renderBigQuote(st);
 

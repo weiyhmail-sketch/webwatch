@@ -74,6 +74,19 @@ class EntryUncertain(Exception):
         self.status = status
 
 
+def _finite(value: Any) -> float | None:
+    """转 float；None / NaN / IBKR 未就绪哨兵(极大值) → None。"""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or abs(f) > 1e15:
+        return None
+    return f
+
+
 def resolve_account(configured: str, managed: list[str]) -> str:
     """决定适配器用哪个账户做 scoping。
 
@@ -133,6 +146,7 @@ class BrokerManager:
         self._env_warning = env_warning  # live 互锁回退等提示，前端醒目展示
         self._ib: IB | None = None
         self._adapter: IbBrokerAdapter | None = None
+        self._account = ""
         # 行情独立模块（webwatch 自有，不依赖 scalper 行情代码）。
         self._quotes = QuoteService(panel.market_data_type)
         self._last_error: str | None = None
@@ -182,8 +196,12 @@ class BrokerManager:
             self._ib = ib
             # 未填真实账户时自动用 Gateway 探测到的账户做 scoping。
             account = resolve_account(s.ibkr_account, list(ib.managedAccounts()))
+            self._account = account
             self._adapter = IbBrokerAdapter(ib, paper_account=account)
             self._last_error = None
+            # 订阅账户盈亏（当日 / 已实现 / 浮动）；流式更新，snapshot 里读。
+            with contextlib.suppress(Exception):
+                ib.reqPnL(account)
             # 行情：绑定连接 + 重订 watchlist
             self._quotes.attach(ib)
             await self._quotes.resubscribe_all()
@@ -264,7 +282,21 @@ class BrokerManager:
             "orders": orders,
             "quotes": self._quotes.quotes(),
             "watchlist": self._quotes.watchlist(),
+            "pnl": self._pnl() if connected else None,
         }
+
+    def _pnl(self) -> dict[str, float | None] | None:
+        """账户盈亏（当日/已实现/浮动）。读 ib.pnl() 流式订阅；未就绪/哨兵值返回 None。"""
+        if self._ib is None:
+            return None
+        lst = self._safe(self._ib.pnl) or []
+        for p in lst:
+            return {
+                "daily": _finite(getattr(p, "dailyPnL", None)),
+                "realized": _finite(getattr(p, "realizedPnL", None)),
+                "unrealized": _finite(getattr(p, "unrealizedPnL", None)),
+            }
+        return None
 
     async def trades_today(self, limit: int = 100) -> list[dict[str, Any]]:
         """今日订单/成交记录（最新在前）。
