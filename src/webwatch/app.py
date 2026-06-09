@@ -278,6 +278,11 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
         broker_.unwatch(symbol)
         return JSONResponse(broker_.snapshot())
 
+    @app.get("/api/trades")
+    async def trades(request: Request) -> JSONResponse:
+        broker_: BrokerLike = request.app.state.broker
+        return JSONResponse({"trades": await broker_.trades_today()})
+
     @app.post("/api/market_data_type")
     async def set_market_data_type(request: Request, body: MarketDataTypeRequest) -> JSONResponse:
         broker_: BrokerLike = request.app.state.broker

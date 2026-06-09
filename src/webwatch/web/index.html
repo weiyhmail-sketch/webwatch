@@ -188,10 +188,19 @@
     </section>
 
     <section class="card">
-      <h2>挂单</h2>
+      <h2>挂单（当前未成交）</h2>
       <table>
         <thead><tr><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>限价</th><th>止损</th><th>状态</th></tr></thead>
         <tbody id="orders"><tr><td colspan="7" class="empty">无挂单</td></tr></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;">今日订单 / 成交记录
+        <button id="refreshTrades" class="btn-ghost" style="padding:3px 12px;font-size:11px;">刷新</button></h2>
+      <table>
+        <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>已成</th><th>成交价</th><th>状态</th></tr></thead>
+        <tbody id="trades"><tr><td colspan="8" class="empty">点「刷新」加载今日订单</td></tr></tbody>
       </table>
     </section>
   </div>
@@ -267,6 +276,24 @@ function render(st) {
     <td>${r.quantity}</td><td>${fmt(r.limit_price)}</td><td>${fmt(r.stop_price)}</td>
     <td>${r.status}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">无挂单</td></tr>';
 }
+
+// 今日订单/成交记录（按需从 /api/trades 拉，含已完成订单）
+function renderTrades(list) {
+  const t = $('trades');
+  t.innerHTML = (list && list.length) ? list.map(r => {
+    const tm = r.time ? new Date(r.time).toLocaleTimeString('zh-CN',{hour12:false}) : '—';
+    const sideZh = r.side === 'BUY' ? '买' : '卖';
+    const stCls = r.status === 'Filled' ? 'up' : ((r.status==='Cancelled'||r.status==='Inactive'||r.status==='ApiCancelled') ? 'mut' : '');
+    return `<tr><td>${tm}</td><td>${r.symbol}</td><td class="${r.side==='BUY'?'up':'down'}">${sideZh}</td><td>${r.order_type}</td>
+      <td>${r.quantity}</td><td>${r.filled}</td><td>${fmt(r.avg_fill_price)}</td>
+      <td class="${stCls}">${r.status}</td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="empty">今日暂无订单</td></tr>';
+}
+async function fetchTrades() {
+  try { const d = await (await fetch('/api/trades')).json(); renderTrades(d.trades); }
+  catch (e) { /* 忽略 */ }
+}
+$('refreshTrades').onclick = fetchTrades;
 
 function renderBigQuote(st) {
   const el = $('bigq');
@@ -363,6 +390,7 @@ async function buyLimit() {
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
   showOrderResult(await post('/api/order/limit', orderBody()), true);
+  fetchTrades();
 }
 function showMarketResult(res) {
   const el = $('orderResult');
@@ -398,6 +426,7 @@ async function buyMarket() {
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
   showMarketResult(await post('/api/order/market', marketBody()));
+  fetchTrades();
 }
 $('previewBtn').onclick = preview;
 $('buyBtn').onclick = buyLimit;
@@ -408,11 +437,13 @@ async function cancelAll() {
   if (!confirm('撤销全部挂单？')) return;
   const d = await (await fetch('/api/cancel_all', {method:'POST'})).json();
   $('err').textContent = d.ok ? '✓ 已撤全部挂单' : ('撤单失败: ' + d.reason);
+  fetchTrades();
 }
 async function flattenAll() {
   if (!confirm('⚠ 市价平掉全部持仓并撤销全部挂单？\n此操作立即执行，不可撤销！')) return;
   const d = await (await fetch('/api/flatten_all', {method:'POST'})).json();
   $('err').textContent = d.ok ? `✓ 已撤单并平 ${d.flattened.length} 个持仓` : ('全平失败: ' + d.reason);
+  fetchTrades();
 }
 $('cancelAllBtn').onclick = cancelAll;
 $('flattenBtn').onclick = flattenAll;
@@ -436,6 +467,7 @@ function connectWS() {
 }
 connectWS();
 fetch('/api/state').then(r => r.json()).then(render);
+fetchTrades();
 </script>
 </body>
 </html>

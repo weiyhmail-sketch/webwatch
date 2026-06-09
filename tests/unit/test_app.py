@@ -72,6 +72,12 @@ class FakeBroker:
         self.mdt = mdt
         return mdt
 
+    async def trades_today(self, limit: int = 100) -> list[dict[str, Any]]:
+        return [{
+            "time": None, "symbol": "AAPL", "side": "BUY", "order_type": "MKT",
+            "quantity": 10.0, "filled": 10.0, "avg_fill_price": 200.0, "status": "Filled",
+        }]
+
     def unwatch(self, symbol: str) -> None:
         s = symbol.strip().upper()
         if s in self.watchlist:
@@ -405,6 +411,15 @@ def test_closed_session_rejects_market(monkeypatch: Any) -> None:
         r = c.post("/api/order/market", json=_market_body())
         assert r.status_code == 400
         assert len(fake.placed) == 0 and len(fake.market_orders) == 0
+
+
+def test_trades_endpoint() -> None:
+    with _client() as c:
+        r = c.get("/api/trades")
+        body = r.json()
+        assert "trades" in body
+        assert body["trades"][0]["symbol"] == "AAPL"
+        assert body["trades"][0]["status"] == "Filled"
 
 
 def test_market_data_type_endpoint() -> None:

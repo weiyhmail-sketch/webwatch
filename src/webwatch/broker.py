@@ -95,6 +95,7 @@ class BrokerLike(Protocol):
     async def watch(self, symbol: str) -> None: ...
     def unwatch(self, symbol: str) -> None: ...
     async def set_market_data_type(self, mdt: int) -> int: ...
+    async def trades_today(self, limit: int = 100) -> list[dict[str, Any]]: ...
     def snapshot(self) -> dict[str, Any]: ...
     async def place_limit_bracket(
         self,
@@ -264,6 +265,69 @@ class BrokerManager:
             "quotes": self._quotes.quotes(),
             "watchlist": self._quotes.watchlist(),
         }
+
+    async def trades_today(self, limit: int = 100) -> list[dict[str, Any]]:
+        """今日订单/成交记录（最新在前）。
+
+        先 ``reqCompletedOrdersAsync`` 向 IBKR 拉当日**已完成**订单（含其他客户端/重启前下的），
+        再序列化 ``ib.trades()``（已完成 + 本 session 开放单）。on-demand 调用，不进 300ms 快照循环。
+        """
+        if not self.is_connected() or self._ib is None:
+            return []
+        with contextlib.suppress(Exception):
+            await self._ib.reqCompletedOrdersAsync(apiOnly=False)
+        with contextlib.suppress(Exception):
+            await self._ib.reqAllOpenOrdersAsync()
+        return self._serialize_trades(limit)
+
+    def _serialize_trades(self, limit: int = 100) -> list[dict[str, Any]]:
+        if self._ib is None:
+            return []
+        trades = self._safe(self._ib.trades) or []
+        out: list[dict[str, Any]] = []
+        for t in reversed(list(trades)):
+            try:
+                o, s = t.order, t.orderStatus
+                # 已完成订单经 reqCompletedOrders 取回时，成交量/价常不在 orderStatus，
+                # 而在 fills（成交回报）里。优先用 fills 算真实成交量 + 加权均价。
+                fills = getattr(t, "fills", None) or []
+                fill_qty = 0.0
+                notional = 0.0
+                fill_time = None
+                for f in fills:
+                    ex = getattr(f, "execution", None)
+                    if ex is None:
+                        continue
+                    sh = float(getattr(ex, "shares", 0) or 0)
+                    px = float(getattr(ex, "price", 0) or 0)
+                    fill_qty += sh
+                    notional += sh * px
+                    fill_time = getattr(ex, "time", None)
+                avg = (notional / fill_qty) if fill_qty else (
+                    float(s.avgFillPrice) if s.avgFillPrice else None
+                )
+                filled = fill_qty or float(s.filled or 0)
+                qty = float(o.totalQuantity or 0) or filled
+                log = getattr(t, "log", None) or []
+                t_obj = fill_time or (log[-1].time if log else None)
+                ts = t_obj.isoformat() if t_obj is not None else None
+                out.append(
+                    {
+                        "time": ts,
+                        "symbol": t.contract.symbol,
+                        "side": o.action,  # BUY / SELL
+                        "order_type": o.orderType,
+                        "quantity": qty,
+                        "filled": filled,
+                        "avg_fill_price": avg,
+                        "status": s.status,
+                    }
+                )
+            except Exception:  # noqa: BLE001 — 单条解析失败跳过，不拖垮整表
+                continue
+            if len(out) >= limit:
+                break
+        return out
 
     # ---- 下单（M3：限价 + 模式B 原生 bracket）---------------------------
 

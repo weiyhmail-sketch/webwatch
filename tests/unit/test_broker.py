@@ -60,6 +60,65 @@ class TestIsLiveAndSnapshot:
         assert snap["environment"] == "paper"
 
 
+def _fill(shares: float, price: float, t: Any) -> Any:
+    return SimpleNamespace(execution=SimpleNamespace(shares=shares, price=price, time=t))
+
+
+class _TradeRec:
+    def __init__(self, sym: str, action: str, otype: str, qty: float,
+                 status: str, filled: float, avg: float, t: Any,
+                 fills: list[Any] | None = None) -> None:
+        self.contract = SimpleNamespace(symbol=sym)
+        self.order = SimpleNamespace(action=action, orderType=otype, totalQuantity=qty)
+        self.orderStatus = SimpleNamespace(status=status, filled=filled, avgFillPrice=avg)
+        self.log = [SimpleNamespace(time=t)]
+        self.fills = fills or []
+
+
+class _TradesFakeIB:
+    def __init__(self, trades: list[Any]) -> None:
+        self._trades = trades
+
+    def isConnected(self) -> bool:  # noqa: N802
+        return True
+
+    async def reqCompletedOrdersAsync(self, apiOnly: bool = False) -> list[Any]:  # noqa: N802
+        return []
+
+    async def reqAllOpenOrdersAsync(self) -> list[Any]:  # noqa: N802
+        return []
+
+    def trades(self) -> list[Any]:
+        return self._trades
+
+
+class TestTradesToday:
+    async def test_serializes_newest_first(self) -> None:
+        t1 = _TradeRec("AAPL", "BUY", "MKT", 10, "Filled", 10, 200.0,
+                       pd.Timestamp("2026-06-09T10:00:00Z"))
+        t2 = _TradeRec("AAPL", "SELL", "LMT", 10, "Cancelled", 0, 0.0,
+                       pd.Timestamp("2026-06-09T10:01:00Z"))
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = _TradesFakeIB([t1, t2])  # type: ignore[assignment]
+        rows = await bm.trades_today()
+        assert len(rows) == 2
+        assert rows[0]["status"] == "Cancelled"  # 最新在前(t2)
+        assert rows[1]["status"] == "Filled" and rows[1]["avg_fill_price"] == 200.0
+        assert rows[0]["avg_fill_price"] is None
+
+    async def test_filled_uses_fills_when_orderstatus_empty(self) -> None:
+        # reqCompletedOrders 取回的已成交单：totalQuantity/filled/avg 为 0，真实成交在 fills 里
+        ts = pd.Timestamp("2026-06-09T10:00:00Z")
+        rec = _TradeRec("AAOI", "BUY", "MKT", 0, "Filled", 0, 0.0, ts,
+                        fills=[_fill(60, 10.0, ts), _fill(40, 10.5, ts)])
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = _TradesFakeIB([rec])  # type: ignore[assignment]
+        rows = await bm.trades_today()
+        assert rows[0]["filled"] == 100.0  # 60+40 来自 fills
+        assert rows[0]["quantity"] == 100.0
+        assert abs(rows[0]["avg_fill_price"] - 10.2) < 1e-9  # (60*10+40*10.5)/100
+
+
 class TestResolveAccount:
     def test_configured_real_account_wins(self) -> None:
         assert resolve_account("DU1234567", ["DU9999999"]) == "DU1234567"
