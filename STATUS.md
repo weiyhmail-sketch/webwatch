@@ -31,6 +31,18 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 
 ---
 
+## 行情模块重做为独立 quotes.py（2026-06-08，按用户要求）
+
+用户指出不要依赖 scalper 行情代码。**事实确认**：webwatch 从未 import scalper 行情模块
+（无 realtime_bar_subscriber/historical_loader/tick_validator）——一直是自有 `reqMktData`。
+本轮把行情从 broker.py **抽成独立 [quotes.py](src/webwatch/quotes.py)（`QuoteService`）**，并增强：
+- 用 ib_async `reqMktData` **L1 逐笔 tick 流**（非 scalper 的 5 秒 K 线 + HMDS 限流/卡死那套）。
+- **运行时切换行情类型**（实时/冻结/延迟/延迟冻结）：实时被占用(10197)时一键切免费延迟行情，无需重启。
+  `POST /api/market_data_type`；前端下拉。
+- 每个报价上报**实际行情类型**（ticker.marketDataType）→ 前端显示"实时/延迟"，防误判。
+- broker.py 仅委托（watch/unwatch/set_market_data_type/snapshot.quotes）；行情完全独立于 scalper。
+- 14 单测覆盖（[test_quotes.py](tests/unit/test_quotes.py)）。**当前 114 单测全绿**。
+
 ## ✅ 下单链路复核 PASS（2026-06-08，round 3 通过）
 
 外部复核方 round-3 判 **PASS**。下单链路（pricing/order_service/broker/risk/app）经

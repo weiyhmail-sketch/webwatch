@@ -103,10 +103,18 @@
 
   <section class="card full">
     <h2>报价 (watchlist)</h2>
-    <div style="margin-bottom:10px;">
+    <div style="margin-bottom:10px; display:flex; align-items:center; gap:10px;">
       <input id="symInput" placeholder="代码 如 AAPL" />
       <button id="addBtn">添加</button>
-      <span class="mut" id="mdtype"></span>
+      <label class="mut" style="display:flex; align-items:center; gap:4px;">行情类型
+        <select id="mdtype">
+          <option value="1">实时</option>
+          <option value="2">冻结</option>
+          <option value="3">延迟</option>
+          <option value="4">延迟冻结</option>
+        </select>
+      </label>
+      <span class="mut" style="font-size:12px;">实时被占用(10197)时切「延迟」可看免费行情</span>
     </div>
     <table>
       <thead><tr><th>代码</th><th>买一</th><th>卖一</th><th>最新</th><th>昨收</th><th></th></tr></thead>
@@ -152,8 +160,7 @@ function render(st) {
   else if (st.env_warning) { bar.className = 'warn'; bar.textContent = '⚠ ' + st.env_warning; }
   else { bar.className = ''; bar.textContent = ''; }
   $('err').textContent = st.error ? ('⚠ ' + st.error) : '';
-  const mdt = {1:'实时',2:'冻结',3:'延迟',4:'延迟冻结'}[st.market_data_type] || st.market_data_type;
-  $('mdtype').textContent = '行情:' + mdt;
+  if (document.activeElement !== $('mdtype')) $('mdtype').value = String(st.market_data_type || 1);
 
   // 账户
   const a = st.account;
@@ -165,10 +172,12 @@ function render(st) {
 
   // 报价
   const q = $('quotes');
-  q.innerHTML = (st.quotes && st.quotes.length) ? st.quotes.map(r => `
-    <tr><td>${r.symbol}</td><td>${fmt(r.bid)}</td><td>${fmt(r.ask)}</td>
+  q.innerHTML = (st.quotes && st.quotes.length) ? st.quotes.map(r => {
+    const tag = r.data_type ? `<span class="mut" style="font-size:11px"> ${r.data_type}</span>` : '';
+    return `<tr><td>${r.symbol}${tag}</td><td>${fmt(r.bid)}</td><td>${fmt(r.ask)}</td>
     <td>${fmt(r.last)}</td><td>${fmt(r.close)}</td>
-    <td class="x" onclick="unwatch('${r.symbol}')">✕</td></tr>`).join('')
+    <td class="x" onclick="unwatch('${r.symbol}')">✕</td></tr>`;
+  }).join('')
     : '<tr><td colspan="6" class="empty">还没有关注的标的</td></tr>';
 
   // 持仓
@@ -209,6 +218,10 @@ async function reconnect() {
 $('addBtn').onclick = addWatch;
 $('symInput').addEventListener('keydown', e => { if (e.key === 'Enter') addWatch(); });
 $('reconnect').onclick = reconnect;
+$('mdtype').addEventListener('change', async (e) => {
+  await fetch('/api/market_data_type', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({market_data_type: Number(e.target.value)})});
+});
 
 // --- 下单 ---
 function orderBody() {

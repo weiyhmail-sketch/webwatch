@@ -65,6 +65,12 @@ class FakeBroker:
         if s and s not in self.watchlist:
             self.watchlist.append(s)
 
+    async def set_market_data_type(self, mdt: int) -> int:
+        if mdt not in (1, 2, 3, 4):
+            raise ValueError("bad type")
+        self.mdt = mdt
+        return mdt
+
     def unwatch(self, symbol: str) -> None:
         s = symbol.strip().upper()
         if s in self.watchlist:
@@ -332,6 +338,15 @@ def test_paper_has_no_live_cap() -> None:
     fake = FakeBroker(live=False)
     findings = _risk_for(fake, Decimal("300"), Decimal("299"), 100, Side.LONG, PanelConfig({}))
     assert not any(f.code == "live_order_cap" for f in findings)
+
+
+def test_market_data_type_endpoint() -> None:
+    fake = FakeBroker()
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/market_data_type", json={"market_data_type": 3})
+        assert r.json() == {"ok": True, "market_data_type": 3}
+        bad = c.post("/api/market_data_type", json={"market_data_type": 9})
+        assert bad.status_code == 400
 
 
 def test_cancel_all_endpoint() -> None:

@@ -44,6 +44,10 @@ class WatchRequest(BaseModel):
     symbol: str
 
 
+class MarketDataTypeRequest(BaseModel):
+    market_data_type: int  # 1=实时 2=冻结 3=延迟 4=延迟冻结
+
+
 class LimitOrderRequest(BaseModel):
     symbol: str
     quantity: int
@@ -262,6 +266,15 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
         broker_: BrokerLike = request.app.state.broker
         broker_.unwatch(symbol)
         return JSONResponse(broker_.snapshot())
+
+    @app.post("/api/market_data_type")
+    async def set_market_data_type(request: Request, body: MarketDataTypeRequest) -> JSONResponse:
+        broker_: BrokerLike = request.app.state.broker
+        try:
+            mdt = await broker_.set_market_data_type(body.market_data_type)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+        return JSONResponse({"ok": True, "market_data_type": mdt})
 
     @app.post("/api/reconnect")
     async def reconnect(request: Request) -> JSONResponse:

@@ -18,7 +18,7 @@ import math
 from decimal import Decimal
 from typing import Any, NoReturn, Protocol, TypeVar
 
-from ib_async import IB, LimitOrder, MarketOrder, Stock, StopOrder, Ticker
+from ib_async import IB, LimitOrder, MarketOrder, Stock, StopOrder
 from scalper.execution.ib_broker_adapter import (
     IbBrokerAdapter,
     connect_live_async,
@@ -30,6 +30,7 @@ from scalper.strategy.base import Side
 
 from webwatch.config import Environment, IBKRSettings, PanelConfig
 from webwatch.pricing import BracketPrices, Target, compute_bracket
+from webwatch.quotes import QuoteService
 from webwatch.serialize import account_to_dict, order_to_dict, position_to_dict
 
 log = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ class BrokerLike(Protocol):
     def is_live(self) -> bool: ...
     async def watch(self, symbol: str) -> None: ...
     def unwatch(self, symbol: str) -> None: ...
+    async def set_market_data_type(self, mdt: int) -> int: ...
     def snapshot(self) -> dict[str, Any]: ...
     async def place_limit_bracket(
         self,
@@ -117,15 +119,6 @@ class BrokerLike(Protocol):
     async def flatten_all(self) -> dict[str, Any]: ...
 
 
-def _num(value: float | None) -> float | None:
-    """把 ib_async ticker 的 nan/None 归一成 None（方便 JSON / 前端）。"""
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    return value
-
-
 class BrokerManager:
     """真实 IBKR 连接管理。"""
 
@@ -133,13 +126,11 @@ class BrokerManager:
         self, settings: IBKRSettings, panel: PanelConfig, *, env_warning: str | None = None
     ) -> None:
         self._settings = settings
-        self._market_data_type = panel.market_data_type
         self._env_warning = env_warning  # live 互锁回退等提示，前端醒目展示
         self._ib: IB | None = None
         self._adapter: IbBrokerAdapter | None = None
-        self._watchlist: list[str] = []  # 保持添加顺序
-        self._contracts: dict[str, Stock] = {}
-        self._tickers: dict[str, Ticker] = {}
+        # 行情独立模块（webwatch 自有，不依赖 scalper 行情代码）。
+        self._quotes = QuoteService(panel.market_data_type)
         self._last_error: str | None = None
         # 串行化下单/平仓操作：单个 IB 连接被多个 await 处理器共享，
         # 防止并发下单交叉（OCA 组错乱、撤单撤到刚挂的保护单等）。
@@ -173,15 +164,14 @@ class BrokerManager:
                     expected_account=s.ibkr_account or None,
                 )
             ib.errorEvent += self._on_ib_error
-            ib.reqMarketDataType(self._market_data_type)
             self._ib = ib
             # 未填真实账户时自动用 Gateway 探测到的账户做 scoping。
             account = resolve_account(s.ibkr_account, list(ib.managedAccounts()))
             self._adapter = IbBrokerAdapter(ib, paper_account=account)
             self._last_error = None
-            # 重新订阅之前 watch 的标的
-            for sym in list(self._watchlist):
-                await self._subscribe(sym)
+            # 行情：绑定连接 + 重订 watchlist
+            self._quotes.attach(ib)
+            await self._quotes.resubscribe_all()
             log.info("connected to %s gateway", s.environment.value)
         except Exception as exc:
             self._last_error = f"{type(exc).__name__}: {exc}"
@@ -194,6 +184,7 @@ class BrokerManager:
     async def disconnect(self) -> None:
         if self._ib is not None and self._ib.isConnected():
             self._ib.disconnect()
+        self._quotes.detach()
         self._ib = None
         self._adapter = None
 
@@ -211,57 +202,17 @@ class BrokerManager:
         self._last_error = f"IB {error_code}:{sym} {error_string}"
         log.warning("IB error %s: %s", error_code, error_string)
 
-    # ---- 报价订阅 -------------------------------------------------------
+    # ---- 报价订阅（委托给独立 QuoteService）-----------------------------
 
     async def watch(self, symbol: str) -> None:
-        sym = symbol.strip().upper()
-        if not sym:
-            return
-        if sym not in self._watchlist:
-            self._watchlist.append(sym)
-        if self.is_connected():
-            await self._subscribe(sym)
-
-    async def _subscribe(self, sym: str) -> None:
-        assert self._ib is not None
-        try:
-            contract = Stock(sym, "SMART", "USD")
-            await self._ib.qualifyContractsAsync(contract)
-            self._contracts[sym] = contract
-            self._tickers[sym] = self._ib.reqMktData(contract, "", False, False)
-        except Exception as exc:  # noqa: BLE001 — 单个标的订阅失败不应拖垮面板
-            self._last_error = f"watch {sym}: {type(exc).__name__}: {exc}"
-            log.warning(self._last_error)
+        await self._quotes.subscribe(symbol)
 
     def unwatch(self, symbol: str) -> None:
-        sym = symbol.strip().upper()
-        if sym in self._watchlist:
-            self._watchlist.remove(sym)
-        contract = self._contracts.pop(sym, None)
-        self._tickers.pop(sym, None)
-        if contract is not None and self._ib is not None and self._ib.isConnected():
-            try:
-                self._ib.cancelMktData(contract)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("cancelMktData %s: %s", sym, exc)
+        self._quotes.unsubscribe(symbol)
 
-    def _quotes(self) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
-        for sym in self._watchlist:
-            t = self._tickers.get(sym)
-            if t is None:
-                out.append({"symbol": sym, "bid": None, "ask": None, "last": None, "close": None})
-                continue
-            out.append(
-                {
-                    "symbol": sym,
-                    "bid": _num(t.bid),
-                    "ask": _num(t.ask),
-                    "last": _num(t.last),
-                    "close": _num(t.close),
-                }
-            )
-        return out
+    async def set_market_data_type(self, mdt: int) -> int:
+        """运行时切换行情类型（实时/冻结/延迟/延迟冻结）。"""
+        return await self._quotes.set_market_data_type(mdt)
 
     # ---- 状态快照 -------------------------------------------------------
 
@@ -289,13 +240,13 @@ class BrokerManager:
             "environment": self._settings.environment.value,
             "is_live": self.is_live(),
             "env_warning": self._env_warning,
-            "market_data_type": self._market_data_type,
+            "market_data_type": self._quotes.market_data_type,
             "error": self._last_error,
             "account": account,
             "positions": positions,
             "orders": orders,
-            "quotes": self._quotes(),
-            "watchlist": list(self._watchlist),
+            "quotes": self._quotes.quotes(),
+            "watchlist": self._quotes.watchlist(),
         }
 
     # ---- 下单（M3：限价 + 模式B 原生 bracket）---------------------------
