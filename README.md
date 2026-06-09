@@ -40,4 +40,7 @@ uv run uvicorn webwatch.app:app --reload
 - [x] 行情独立模块 quotes.py（零 scalper 行情依赖 + 运行时切实时/延迟）
 - [x] M8 24h 交易（盘前/盘后/夜盘：outsideRth + 限价入场 + stop-limit 止损 + 市价转激进限价，131 单测全绿）
 
-开发约定见 [CLAUDE.md](CLAUDE.md)。
+## 文档
+- **[OPERATIONS_GUIDE.md](OPERATIONS_GUIDE.md)** — 小白版操作手册（从零跑起来 + paper 验证 + 日常使用，**照着一步步做**）
+- [STATUS.md](STATUS.md) — 进度交接
+- [CLAUDE.md](CLAUDE.md) — 开发约定 + 红线
