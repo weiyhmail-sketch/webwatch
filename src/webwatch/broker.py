@@ -152,8 +152,19 @@ class BrokerManager:
         return self._settings.environment is Environment.LIVE
 
     async def connect(self) -> None:
-        """连接 Gateway（按环境选 paper/live），并重订阅 watchlist。"""
+        """连接 Gateway（按环境选 paper/live），并重订阅 watchlist。
+
+        重连前**先断开已有连接**，否则新连接复用同一 clientId 会与旧连接冲突、连接超时
+        （旧连接还占着 clientId）。
+        """
         s = self._settings
+        # 先清旧连接，释放 clientId，避免重连时自我冲突。
+        if self._ib is not None and self._ib.isConnected():
+            with contextlib.suppress(Exception):
+                self._ib.disconnect()
+        self._quotes.detach()
+        self._ib = None
+        self._adapter = None
         ib = IB()
         try:
             if s.environment is Environment.PAPER:

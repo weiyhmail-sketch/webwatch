@@ -5,174 +5,228 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>WebWatch 下单面板</title>
 <style>
-  :root { --bg:#0f1419; --panel:#1a2029; --line:#2a323d; --txt:#e6e6e6; --muted:#8a94a3;
-          --green:#26a65b; --red:#e0533d; --amber:#e0a93d; --accent:#3d7be0; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--txt);
-         font:14px/1.4 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-  header { display:flex; align-items:center; gap:16px; padding:10px 16px;
-           background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  .badge { padding:3px 10px; border-radius:4px; font-weight:700; letter-spacing:.5px; }
-  .badge.paper { background:var(--green); color:#fff; }
-  .badge.live  { background:var(--red); color:#fff; }
-  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; }
-  .dot.on { background:var(--green); } .dot.off { background:var(--red); }
-  .acct { color:var(--muted); display:flex; gap:14px; flex-wrap:wrap; }
-  .acct b { color:var(--txt); }
-  main { padding:16px; display:grid; gap:16px; grid-template-columns:1fr 1fr; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
-  .card h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase;
-             letter-spacing:.5px; }
-  .full { grid-column:1 / -1; }
-  table { width:100%; border-collapse:collapse; }
-  th,td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }
-  th:first-child, td:first-child { text-align:left; }
-  th { color:var(--muted); font-weight:600; font-size:12px; }
-  tbody tr:hover { background:#222b36; }
-  .pos { color:var(--green); } .neg { color:var(--red); } .mut { color:var(--muted); }
-  input,button { font:inherit; }
-  input { background:#0f1419; border:1px solid var(--line); color:var(--txt);
-          padding:6px 8px; border-radius:4px; width:120px; text-transform:uppercase; }
-  button { background:var(--accent); border:0; color:#fff; padding:6px 12px;
-           border-radius:4px; cursor:pointer; }
-  button.ghost { background:transparent; border:1px solid var(--line); color:var(--muted); }
-  button:hover { filter:brightness(1.1); }
-  .err { color:var(--amber); font-size:12px; }
-  .x { color:var(--muted); cursor:pointer; }
-  .empty { color:var(--muted); padding:8px; }
-  #livebar { display:none; padding:8px 16px; font-weight:700; text-align:center; }
-  #livebar.live { display:block; background:var(--red); color:#fff;
-                  letter-spacing:1px; animation:pulse 1.5s infinite; }
-  #livebar.warn { display:block; background:var(--amber); color:#1a1a1a; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
-  .orderform { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .orderform label { color:var(--muted); display:flex; align-items:center; gap:4px; }
-  .orderform select { background:#0f1419; border:1px solid var(--line); color:var(--txt);
-                      padding:6px 4px; border-radius:4px; }
-  .orderform input { width:90px; }
-  #buyBtn { background:var(--green); font-weight:700; }
-  .orderresult { margin-top:10px; font-size:13px; min-height:18px; }
+  /* 深色专业交易终端风 · 红涨绿跌(A股惯例) */
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2333; --line:#2a313c;
+    --txt:#e6edf3; --muted:#8b949e;
+    --up:#f85149;     /* 涨/盈/买 = 红 */
+    --down:#2ea043;   /* 跌/亏/卖 = 绿 */
+    --accent:#388bfd; --amber:#d29922;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.45 -apple-system,"PingFang SC",Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  /* 顶栏 */
+  header{display:flex;align-items:center;gap:14px;padding:10px 18px;flex-wrap:wrap;
+         background:var(--panel);border-bottom:1px solid var(--line);}
+  .badge{padding:3px 10px;border-radius:6px;font-weight:700;letter-spacing:.5px;font-size:13px;}
+  .badge.paper{background:var(--down);color:#fff;}   /* 模拟=绿(安全) */
+  .badge.live{background:var(--up);color:#fff;}        /* 实盘=红(危险) */
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;}
+  .dot.on{background:var(--down);} .dot.off{background:#6e7681;}
+  .acct{color:var(--muted);display:flex;gap:16px;flex-wrap:wrap;font-size:13px;}
+  .acct b{color:var(--txt);font-variant-numeric:tabular-nums;}
+  .spacer{flex:1;}
+  .err{color:var(--amber);font-size:12px;max-width:340px;}
+  /* 横幅 */
+  #livebar{display:none;padding:9px 18px;font-weight:800;text-align:center;letter-spacing:1px;}
+  #livebar.live{display:block;background:var(--up);color:#fff;animation:pulse 1.4s infinite;}
+  #livebar.warn{display:block;background:var(--amber);color:#1a1a1a;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.65}}
+  /* 主体左右分栏 */
+  main{display:grid;grid-template-columns:380px 1fr;gap:16px;padding:16px;align-items:start;}
+  @media(max-width:860px){main{grid-template-columns:1fr;}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+        padding:14px;margin-bottom:16px;}
+  .right .card:last-child{margin-bottom:0;}
+  .ticket{position:sticky;top:16px;}
+  h2{margin:0 0 12px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+  /* 大号行情 */
+  .bigq{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);
+        padding:14px;margin-bottom:14px;}
+  .bigq .sym{font-size:15px;color:var(--muted);font-weight:600;}
+  .bigq .last{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;margin:2px 0;}
+  .bigq .chg{font-size:15px;font-weight:700;}
+  .bigq .ba{display:flex;gap:18px;margin-top:8px;color:var(--muted);font-size:13px;}
+  .bigq .ba b{color:var(--txt);font-variant-numeric:tabular-nums;}
+  .bigq .ph{color:var(--muted);font-size:13px;padding:8px 0;}
+  /* 表单 */
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+  .row .lbl{color:var(--muted);font-size:12px;width:42px;flex:none;}
+  input,select{font:inherit;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+        padding:8px 10px;border-radius:8px;}
+  input{width:100%;}
+  input.sym{text-transform:uppercase;font-weight:700;}
+  .qtybtns{display:flex;gap:6px;}
+  .qtybtns button{padding:6px 10px;font-size:12px;background:var(--panel2);
+        border:1px solid var(--line);color:var(--muted);border-radius:7px;cursor:pointer;}
+  .qtybtns button:hover{color:var(--txt);border-color:var(--accent);}
+  .tgt{display:flex;gap:6px;align-items:center;flex:1;}
+  .tgt select{flex:none;}
+  .tgt input{width:auto;flex:1;}
+  button{font:inherit;cursor:pointer;border:0;border-radius:8px;}
+  .btn-ghost{background:transparent;border:1px solid var(--line);color:var(--muted);padding:7px 12px;}
+  .btn-ghost:hover{color:var(--txt);}
+  .buybtns{display:flex;gap:10px;margin-top:6px;}
+  .buybtns button{flex:1;background:var(--up);color:#fff;font-weight:800;font-size:16px;
+        padding:14px 0;border-radius:10px;}
+  .buybtns button.mkt{background:#c9402f;}
+  .buybtns button:hover{filter:brightness(1.08);}
+  #previewBtn{width:100%;margin-bottom:8px;}
+  .flatbtn{background:var(--down);color:#fff;font-weight:700;padding:7px 14px;}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px;}
+  .result{margin-top:12px;font-size:13px;min-height:20px;line-height:1.6;}
+  /* 表格 */
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;}
+  th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line);font-size:13px;}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;}
+  tbody tr.q{cursor:pointer;}
+  tbody tr.q:hover{background:#202836;}
+  tr.sel{background:#23304a !important;}
+  .up{color:var(--up);} .down{color:var(--down);} .mut{color:var(--muted);}
+  .x{color:var(--muted);cursor:pointer;}
+  .x:hover{color:var(--up);}
+  .empty{color:var(--muted);padding:10px;text-align:left;}
+  .qrow input{width:120px;} .qrow{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+  .qrow .add{background:var(--accent);color:#fff;padding:8px 14px;}
 </style>
 </head>
 <body>
 <header>
   <span id="env" class="badge paper">PAPER</span>
   <span><span id="dot" class="dot off"></span><span id="conn">未连接</span></span>
-  <span id="session" class="badge" style="background:#2a323d;color:var(--txt)"></span>
+  <span id="session" class="badge" style="background:#2a313c;color:var(--txt)"></span>
   <div class="acct" id="acct"></div>
-  <span style="flex:1"></span>
+  <span class="spacer"></span>
   <span class="err" id="err"></span>
-  <button class="ghost" id="cancelAllBtn" title="c">撤全部挂单</button>
-  <button id="flattenBtn" style="background:var(--red)" title="f">市价全平</button>
-  <button class="ghost" id="reconnect">重连</button>
+  <button class="btn-ghost" id="cancelAllBtn" title="热键 c">撤全部挂单</button>
+  <button class="flatbtn" id="flattenBtn" title="热键 f">市价全平</button>
+  <button class="btn-ghost" id="reconnect">重连</button>
 </header>
 <div id="livebar"></div>
 
 <main>
-  <section class="card full">
-    <h2>下单 — 买入同时自动挂止盈止损</h2>
-    <div class="orderform">
-      <input id="oSym" placeholder="代码" style="width:100px" />
-      <input id="oQty" type="number" value="100" placeholder="数量" style="width:80px" />
-      <input id="oEntry" type="number" step="0.01" placeholder="限价/市价参考价" style="width:130px" />
-      <label>止盈
+  <!-- 左：下单交易票（常驻） -->
+  <section class="card ticket">
+    <h2>下单 · 买入同时挂止盈止损</h2>
+    <div class="bigq" id="bigq"><div class="ph">← 点右侧报价选择标的，或在下方输入代码</div></div>
+
+    <div class="row">
+      <input id="oSym" class="sym" placeholder="代码 如 AAPL" style="flex:1" />
+    </div>
+    <div class="row">
+      <span class="lbl">数量</span>
+      <input id="oQty" type="number" value="100" style="width:90px" />
+      <span class="qtybtns">
+        <button data-q="100">100</button><button data-q="500">500</button><button data-q="1000">1000</button>
+      </span>
+    </div>
+    <div class="row">
+      <span class="lbl">限价</span>
+      <input id="oEntry" type="number" step="0.01" placeholder="限价 / 市价参考价" style="flex:1" />
+    </div>
+    <div class="row">
+      <span class="lbl">止盈</span>
+      <span class="tgt">
         <select id="oTpKind">
-          <option value="pct">%(如0.2=0.2%)</option>
+          <option value="pct">%(0.2=0.2%)</option>
           <option value="price_offset">+$/股</option>
           <option value="profit_usd">盈利$</option>
         </select>
         <input id="oTpVal" value="0.2" />
-      </label>
-      <label>止损
+      </span>
+    </div>
+    <div class="row">
+      <span class="lbl">止损</span>
+      <span class="tgt">
         <select id="oSlKind">
-          <option value="pct">%(如0.4=0.4%)</option>
+          <option value="pct">%(0.4=0.4%)</option>
           <option value="price_offset">-$/股</option>
           <option value="profit_usd">亏损$</option>
         </select>
         <input id="oSlVal" value="0.4" />
-      </label>
-      <button id="previewBtn" class="ghost">预览</button>
-      <button id="buyBtn">限价买入</button>
-      <button id="buyMktBtn" style="background:var(--amber)">市价买入</button>
+      </span>
     </div>
-    <div class="mut" style="font-size:12px;margin-top:6px;">
-      限价买入：用上方价格作母单限价，三单同时挂（零空窗）。
-      市价买入：以市价成交，用<b>真实成交价</b>算止盈止损，上方价格仅作风控/预览参考价。
+    <button id="previewBtn" class="btn-ghost">预览</button>
+    <div class="buybtns">
+      <button id="buyBtn" title="热键 l">买入 · 限价</button>
+      <button id="buyMktBtn" class="mkt" title="热键 b">买入 · 市价</button>
     </div>
-    <div class="orderresult" id="orderResult"></div>
+    <div class="result" id="orderResult"></div>
+    <div class="hint">限价：用上方价格作母单，三单同时挂（零空窗）。市价：以市价成交，用<b>真实成交价</b>算止盈止损。</div>
   </section>
 
-  <section class="card full">
-    <h2>报价 (watchlist)</h2>
-    <div style="margin-bottom:10px; display:flex; align-items:center; gap:10px;">
-      <input id="symInput" placeholder="代码 如 AAPL" />
-      <button id="addBtn">添加</button>
-      <label class="mut" style="display:flex; align-items:center; gap:4px;">行情类型
-        <select id="mdtype">
-          <option value="1">实时</option>
-          <option value="2">冻结</option>
-          <option value="3">延迟</option>
-          <option value="4">延迟冻结</option>
-        </select>
-      </label>
-      <span class="mut" style="font-size:12px;">实时被占用(10197)时切「延迟」可看免费行情</span>
-    </div>
-    <table>
-      <thead><tr><th>代码</th><th>买一</th><th>卖一</th><th>最新</th><th>昨收</th><th></th></tr></thead>
-      <tbody id="quotes"><tr><td colspan="6" class="empty">还没有关注的标的</td></tr></tbody>
-    </table>
-  </section>
+  <!-- 右：报价 / 持仓 / 挂单 -->
+  <div class="right">
+    <section class="card">
+      <h2>报价 · 自选（点一行选中并填入下单）</h2>
+      <div class="qrow">
+        <input id="symInput" placeholder="代码 如 AAPL" />
+        <button class="add" id="addBtn">添加</button>
+        <label class="mut" style="display:flex;align-items:center;gap:6px;font-size:12px;">行情
+          <select id="mdtype">
+            <option value="1">实时</option><option value="2">冻结</option>
+            <option value="3">延迟</option><option value="4">延迟冻结</option>
+          </select>
+        </label>
+        <span class="mut" style="font-size:11px;">实时被占(10197)时切「延迟」</span>
+      </div>
+      <table>
+        <thead><tr><th>代码</th><th>最新</th><th>涨跌%</th><th>买一</th><th>卖一</th><th></th></tr></thead>
+        <tbody id="quotes"><tr><td colspan="6" class="empty">还没有关注的标的</td></tr></tbody>
+      </table>
+    </section>
 
-  <section class="card">
-    <h2>持仓</h2>
-    <table>
-      <thead><tr><th>代码</th><th>方向</th><th>数量</th><th>均价</th><th>现价</th><th>浮盈</th></tr></thead>
-      <tbody id="positions"><tr><td colspan="6" class="empty">无持仓</td></tr></tbody>
-    </table>
-  </section>
+    <section class="card">
+      <h2>持仓</h2>
+      <table>
+        <thead><tr><th>代码</th><th>方向</th><th>数量</th><th>均价</th><th>现价</th><th>浮盈</th></tr></thead>
+        <tbody id="positions"><tr><td colspan="6" class="empty">无持仓</td></tr></tbody>
+      </table>
+    </section>
 
-  <section class="card">
-    <h2>挂单</h2>
-    <table>
-      <thead><tr><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>限价</th><th>止损价</th><th>状态</th></tr></thead>
-      <tbody id="orders"><tr><td colspan="7" class="empty">无挂单</td></tr></tbody>
-    </table>
-  </section>
+    <section class="card">
+      <h2>挂单</h2>
+      <table>
+        <thead><tr><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>限价</th><th>止损</th><th>状态</th></tr></thead>
+        <tbody id="orders"><tr><td colspan="7" class="empty">无挂单</td></tr></tbody>
+      </table>
+    </section>
+  </div>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let isLive = false;  // 由 render() 根据 state 更新；下单确认用
-let isRth = true;    // 是否常规盘；时段外市价会转激进限价
-let sessionLabel = '';
-const fmt = (v, d=2) => (v === null || v === undefined) ? '<span class="mut">—</span>' : Number(v).toFixed(d);
+let isLive = false, isRth = true, sessionLabel = '';
+let selectedSymbol = '';
+let lastState = null;
+const fmt = (v, d=2) => (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
 const money = (v) => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
-const sideCls = (s) => s === 'long' ? 'pos' : 'neg';
+// 红涨绿跌：>=0 用 up(红)，<0 用 down(绿)
+const chgCls = (v) => (v === null || v === undefined) ? 'mut' : (v >= 0 ? 'up' : 'down');
 
 function render(st) {
-  // 环境 + 连接
+  lastState = st;
   const env = $('env');
   env.textContent = (st.environment || 'paper').toUpperCase();
   env.className = 'badge ' + (st.environment === 'live' ? 'live' : 'paper');
   $('dot').className = 'dot ' + (st.connected ? 'on' : 'off');
   $('conn').textContent = st.connected ? '已连接' : '未连接';
-  // LIVE 醒目横幅 / 互锁回退警告
   isLive = !!st.is_live;
   const bar = $('livebar');
-  if (isLive) { bar.className = 'live'; bar.textContent = '🔴 LIVE 实盘 — 真金白银，每笔下单都会用真实资金成交'; }
+  if (isLive) { bar.className = 'live'; bar.textContent = '🔴 LIVE 实盘 — 真金白银，每笔下单都用真实资金成交'; }
   else if (st.env_warning) { bar.className = 'warn'; bar.textContent = '⚠ ' + st.env_warning; }
   else { bar.className = ''; bar.textContent = ''; }
   $('err').textContent = st.error ? ('⚠ ' + st.error) : '';
   if (document.activeElement !== $('mdtype')) $('mdtype').value = String(st.market_data_type || 1);
-  // 交易时段
-  isRth = !!st.is_rth;
-  sessionLabel = st.session || '';
+  isRth = !!st.is_rth; sessionLabel = st.session || '';
   const sEl = $('session');
-  sEl.textContent = sessionLabel ? ('时段:' + sessionLabel) : '';
-  sEl.style.background = isRth ? 'var(--green)' : (sessionLabel === '休市' ? '#555' : 'var(--amber)');
-  sEl.style.color = isRth ? '#fff' : (sessionLabel === '休市' ? '#fff' : '#1a1a1a');
+  sEl.textContent = sessionLabel ? ('时段 ' + sessionLabel) : '';
+  sEl.style.background = isRth ? 'var(--down)' : (sessionLabel === '休市' ? '#555' : 'var(--amber)');
+  sEl.style.color = (isRth || sessionLabel === '休市') ? '#fff' : '#1a1a1a';
 
-  // 账户
   const a = st.account;
   $('acct').innerHTML = a ? `
     <span>账户 <b>${a.account}</b></span>
@@ -180,77 +234,107 @@ function render(st) {
     <span>现金 <b>${money(a.total_cash_value)}</b></span>
     <span>购买力 <b>${money(a.buying_power)}</b></span>` : '<span class="mut">账户数据不可用</span>';
 
-  // 报价
+  renderBigQuote(st);
+
+  // 报价表
   const q = $('quotes');
   q.innerHTML = (st.quotes && st.quotes.length) ? st.quotes.map(r => {
-    const tag = r.data_type ? `<span class="mut" style="font-size:11px"> ${r.data_type}</span>` : '';
-    return `<tr><td>${r.symbol}${tag}</td><td>${fmt(r.bid)}</td><td>${fmt(r.ask)}</td>
-    <td>${fmt(r.last)}</td><td>${fmt(r.close)}</td>
-    <td class="x" onclick="unwatch('${r.symbol}')">✕</td></tr>`;
-  }).join('')
-    : '<tr><td colspan="6" class="empty">还没有关注的标的</td></tr>';
+    const chg = (r.last != null && r.close) ? (r.last - r.close) : null;
+    const pct = (chg != null && r.close) ? (chg / r.close * 100) : null;
+    const cls = chgCls(chg);
+    const tag = r.data_type ? `<span class="mut" style="font-size:10px"> ${r.data_type}</span>` : '';
+    const selCls = r.symbol === selectedSymbol ? ' sel' : '';
+    return `<tr class="q${selCls}" onclick="selectSym('${r.symbol}')">
+      <td>${r.symbol}${tag}</td><td class="${cls}">${fmt(r.last)}</td>
+      <td class="${cls}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td>
+      <td>${fmt(r.bid)}</td><td>${fmt(r.ask)}</td>
+      <td class="x" onclick="event.stopPropagation();unwatch('${r.symbol}')">✕</td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="empty">还没有关注的标的</td></tr>';
 
   // 持仓
   const p = $('positions');
   p.innerHTML = (st.positions && st.positions.length) ? st.positions.map(r => {
     const pnl = r.unrealized_pnl;
-    const cls = pnl === null ? 'mut' : (pnl >= 0 ? 'pos' : 'neg');
-    return `<tr><td>${r.symbol}</td><td class="${sideCls(r.side)}">${r.side}</td>
+    return `<tr><td>${r.symbol}</td><td>${r.side==='long'?'多':'空'}</td>
     <td>${r.quantity}</td><td>${fmt(r.avg_entry_price)}</td><td>${fmt(r.mark_price)}</td>
-    <td class="${cls}">${pnl === null ? '—' : money(pnl)}</td></tr>`;
+    <td class="${chgCls(pnl)}">${pnl==null?'—':money(pnl)}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">无持仓</td></tr>';
 
   // 挂单
   const o = $('orders');
   o.innerHTML = (st.orders && st.orders.length) ? st.orders.map(r => `
-    <tr><td>${r.symbol}</td><td class="${sideCls(r.side)}">${r.side}</td><td>${r.order_type}</td>
+    <tr><td>${r.symbol}</td><td>${r.side==='long'?'多':'空'}</td><td>${r.order_type}</td>
     <td>${r.quantity}</td><td>${fmt(r.limit_price)}</td><td>${fmt(r.stop_price)}</td>
-    <td>${r.status}</td></tr>`).join('')
-    : '<tr><td colspan="7" class="empty">无挂单</td></tr>';
+    <td>${r.status}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">无挂单</td></tr>';
 }
+
+function renderBigQuote(st) {
+  const el = $('bigq');
+  if (!selectedSymbol) { el.innerHTML = '<div class="ph">← 点右侧报价选择标的，或在下方输入代码</div>'; return; }
+  const r = (st.quotes || []).find(x => x.symbol === selectedSymbol);
+  if (!r) { el.innerHTML = `<div class="sym">${selectedSymbol}</div><div class="ph">未在自选中 / 暂无行情，点右侧「添加」</div>`; return; }
+  const chg = (r.last != null && r.close) ? (r.last - r.close) : null;
+  const pct = (chg != null && r.close) ? (chg / r.close * 100) : null;
+  const cls = chgCls(chg);
+  el.innerHTML = `
+    <div class="sym">${r.symbol} <span class="mut" style="font-size:11px">${r.data_type||''}</span></div>
+    <div class="last ${cls}">${fmt(r.last)}</div>
+    <div class="chg ${cls}">${chg==null?'—':((chg>=0?'+':'')+chg.toFixed(2)+'  '+(pct>=0?'+':'')+pct.toFixed(2)+'%')}</div>
+    <div class="ba"><span>买一 <b>${fmt(r.bid)}</b></span><span>卖一 <b>${fmt(r.ask)}</b></span><span>昨收 <b>${fmt(r.close)}</b></span></div>`;
+}
+
+// 点报价行 → 选中 + 填代码/参考价
+function selectSym(sym) {
+  selectedSymbol = sym;
+  $('oSym').value = sym;
+  const r = (lastState && lastState.quotes || []).find(x => x.symbol === sym);
+  if (r) { const px = r.ask != null ? r.ask : (r.last != null ? r.last : null); if (px != null) $('oEntry').value = px; }
+  if (lastState) renderBigQuote(lastState);
+  // 高亮选中行
+  document.querySelectorAll('#quotes tr.q').forEach(tr => tr.classList.remove('sel'));
+}
+$('oSym').addEventListener('input', () => { selectedSymbol = $('oSym').value.trim().toUpperCase(); if (lastState) renderBigQuote(lastState); });
+document.querySelectorAll('.qtybtns button').forEach(b => b.onclick = () => { $('oQty').value = b.dataset.q; });
 
 async function addWatch() {
   const sym = $('symInput').value.trim();
   if (!sym) return;
   $('symInput').value = '';
-  const r = await fetch('/api/watch', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({symbol: sym})});
+  const r = await fetch('/api/watch', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({symbol: sym})});
+  if (!selectedSymbol) selectedSymbol = sym.toUpperCase();
   render(await r.json());
 }
 async function unwatch(sym) {
   const r = await fetch('/api/watch/' + encodeURIComponent(sym), {method:'DELETE'});
+  if (selectedSymbol === sym) selectedSymbol = '';
   render(await r.json());
 }
-async function reconnect() {
-  $('conn').textContent = '连接中…';
-  await fetch('/api/reconnect', {method:'POST'});
-}
+async function reconnect() { $('conn').textContent = '连接中…'; await fetch('/api/reconnect', {method:'POST'}); }
 $('addBtn').onclick = addWatch;
 $('symInput').addEventListener('keydown', e => { if (e.key === 'Enter') addWatch(); });
 $('reconnect').onclick = reconnect;
 $('mdtype').addEventListener('change', async (e) => {
-  await fetch('/api/market_data_type', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({market_data_type: Number(e.target.value)})});
+  await fetch('/api/market_data_type', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({market_data_type: Number(e.target.value)})});
 });
 
-// --- 下单 ---
-// % 模式下用户输入百分数(0.2=0.2%)，后端要小数(0.002)，这里 ÷100 转换。
+// --- 下单：% 模式输入百分数(0.2=0.2%)，前端 ÷100 转后端要的小数 ---
 function tgtVal(kindId, valId) {
   const k = $(kindId).value, v = $(valId).value;
   if (k === 'pct' && v.trim() !== '' && !isNaN(Number(v))) return String(Number(v) / 100);
   return v;
 }
 function orderBody() {
-  return {
-    symbol: $('oSym').value, quantity: Number($('oQty').value),
-    entry_limit: $('oEntry').value,
-    tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind', 'oTpVal'),
-    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind', 'oSlVal'), side: 'long',
-  };
+  return { symbol: $('oSym').value, quantity: Number($('oQty').value), entry_limit: $('oEntry').value,
+    tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind','oTpVal'),
+    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind','oSlVal'), side: 'long' };
 }
-async function postOrder(path) {
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(orderBody())});
+function marketBody() {
+  return { symbol: $('oSym').value, quantity: Number($('oQty').value), ref_price: $('oEntry').value,
+    tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind','oTpVal'),
+    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind','oSlVal'), side: 'long' };
+}
+async function post(path, body) {
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   return r.json();
 }
 function riskHtml(res) {
@@ -260,88 +344,63 @@ function riskHtml(res) {
 }
 function showOrderResult(res, placed) {
   const el = $('orderResult');
-  if (res.rejected) { el.innerHTML = `<span class="neg">✕ 拒绝：${res.reason}</span>`; return; }
+  if (res.rejected) { el.innerHTML = `<span class="down">✕ 拒绝：${res.reason}</span>`; return; }
   const p = res.plan;
   const warn = ((p.warnings && p.warnings.length) ? `<div class="err">⚠ ${p.warnings.join('；')}</div>` : '') + riskHtml(res);
   const head = placed
-    ? `<span class="pos">✓ 已下单</span> <span class="mut">(单号 ${res.placement.parent_id}/${res.placement.take_profit_id}/${res.placement.stop_loss_id})</span>`
+    ? `<span class="up">✓ 已下单</span> <span class="mut">(单号 ${res.placement.parent_id}/${res.placement.take_profit_id}/${res.placement.stop_loss_id})</span>`
     : '<span class="mut">预览</span>';
-  el.innerHTML = `${head} — 止盈 <b>${p.take_profit}</b> / 止损 <b>${p.stop_loss}</b> /
-    金额 ${money(p.notional)} / 扣费净盈亏 <b class="${p.profitable?'pos':'neg'}">${money(p.net_pnl)}</b>${warn}`;
+  el.innerHTML = `${head} — 止盈 <b class="up">${p.take_profit}</b> / 止损 <b class="down">${p.stop_loss}</b> /
+    金额 ${money(p.notional)} / 扣费净盈亏 <b class="${p.profitable?'up':'down'}">${money(p.net_pnl)}</b>${warn}`;
 }
-async function preview() { showOrderResult(await postOrder('/api/order/preview'), false); }
+async function preview() { showOrderResult(await post('/api/order/preview', orderBody()), false); }
 async function buyLimit() {
-  const pr = await postOrder('/api/order/preview');
+  const pr = await post('/api/order/preview', orderBody());
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
   let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
     `确认限价买入 ${p.symbol} ${p.quantity} 股 @ ${p.entry_limit}\n止盈 ${p.take_profit} / 止损 ${p.stop_loss}\n扣费净盈亏 ${p.net_pnl}`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
-  showOrderResult(await postOrder('/api/order/limit'), true);
-}
-$('previewBtn').onclick = preview;
-$('buyBtn').onclick = buyLimit;
-
-// --- 市价买入（模式A：成交后用真实成交价挂止盈止损）---
-function marketBody() {
-  return {
-    symbol: $('oSym').value, quantity: Number($('oQty').value),
-    ref_price: $('oEntry').value,
-    tp_kind: $('oTpKind').value, tp_value: tgtVal('oTpKind', 'oTpVal'),
-    sl_kind: $('oSlKind').value, sl_value: tgtVal('oSlKind', 'oSlVal'), side: 'long',
-  };
-}
-async function postMarket(path) {
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(marketBody())});
-  return r.json();
+  showOrderResult(await post('/api/order/limit', orderBody()), true);
 }
 function showMarketResult(res) {
   const el = $('orderResult');
   if (res.protection_failed) {
     const f = res.flatten || {};
-    const flatMsg = f.failed
-      ? `<b>⚠ 紧急平仓下单也失败，可能裸仓——立即手动平仓！</b>`
-      : (f.flatten_order_id && f.quantity > 0)
-        ? `已紧急平仓 ${f.quantity} 股（单号 ${f.flatten_order_id}）`
-        : `<b>未能确认平仓，请立即手动检查持仓！</b>`;
-    el.innerHTML = `<span class="neg">⚠ 保护单失败！</span> 成交 ${res.filled} 股 @ ${res.fill_price} — ${flatMsg}。原因：${res.reason}`;
+    const flatMsg = f.failed ? `<b>⚠ 紧急平仓也失败，可能裸仓——立即手动平仓！</b>`
+      : (f.flatten_order_id && f.quantity > 0) ? `已紧急平仓 ${f.quantity} 股（单号 ${f.flatten_order_id}）`
+      : `<b>未能确认平仓，请立即手动检查持仓！</b>`;
+    el.innerHTML = `<span class="down">⚠ 保护单失败！</span> 成交 ${res.filled} 股 @ ${res.fill_price} — ${flatMsg}。原因：${res.reason}`;
     return;
   }
-  if (res.entry_uncertain) {
-    el.innerHTML = `<span class="neg">⚠ 入场单状态未知（可能已成交）！请立即检查持仓与挂单。</span> ${res.reason}`;
-    return;
-  }
-  if (res.rejected) { el.innerHTML = `<span class="neg">✕ 拒绝：${res.reason}</span>`; return; }
+  if (res.entry_uncertain) { el.innerHTML = `<span class="down">⚠ 入场单状态未知（可能已成交）！请立即检查持仓与挂单。</span> ${res.reason}`; return; }
+  if (res.rejected) { el.innerHTML = `<span class="down">✕ 拒绝：${res.reason}</span>`; return; }
   const pl = res.placement;
-  if (!pl) { el.innerHTML = `<span class="neg">✕ 异常响应，请检查持仓</span>`; return; }
-  // 时段外：市价已转激进限价 bracket（返回限价 bracket 形态）
+  if (!pl) { el.innerHTML = `<span class="down">✕ 异常响应，请检查持仓</span>`; return; }
   if (res.converted_to_limit) {
-    const p = res.plan;
-    el.innerHTML = `<span class="pos">✓ 时段外已挂激进限价 bracket</span>（市价时段外不可用）—
-      限价 <b>${pl.entry_limit}</b> / 止盈 <b>${pl.take_profit}</b> /
-      止损 <b>${pl.stop_loss}</b>${pl.stop_limit ? ' (stop-limit '+pl.stop_limit+')' : ''}
+    el.innerHTML = `<span class="up">✓ 时段外已挂激进限价 bracket</span>（市价时段外不可用）—
+      限价 <b>${pl.entry_limit}</b> / 止盈 <b class="up">${pl.take_profit}</b> / 止损 <b class="down">${pl.stop_loss}</b>${pl.stop_limit ? ' (stop-limit '+pl.stop_limit+')' : ''}
       <span class="mut">outsideRth · 单号 ${pl.parent_id}/${pl.take_profit_id}/${pl.stop_loss_id}</span>${riskHtml(res)}`;
     return;
   }
   if (pl.filled === 0) { el.innerHTML = `<span class="mut">市价单未成交（${pl.message||''}）</span>`; return; }
-  el.innerHTML = `<span class="pos">✓ 市价成交</span> ${pl.filled} 股 @ <b>${pl.fill_price}</b> —
-    止盈 <b>${pl.take_profit}</b> / 止损 <b>${pl.stop_loss}</b>
-    <span class="mut">(OCA ${pl.oca_group})</span>${riskHtml(res)}`;
+  el.innerHTML = `<span class="up">✓ 市价成交</span> ${pl.filled} 股 @ <b>${pl.fill_price}</b> —
+    止盈 <b class="up">${pl.take_profit}</b> / 止损 <b class="down">${pl.stop_loss}</b> <span class="mut">(OCA ${pl.oca_group})</span>${riskHtml(res)}`;
 }
 async function buyMarket() {
-  const pr = await postMarket('/api/order/market/preview');
+  const pr = await post('/api/order/market/preview', marketBody());
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
   let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
-    `确认【市价买入】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n` +
-    `成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
-  if (!isRth) msg += `\n\n⏰ 当前为${sessionLabel}（时段外）：市价不可用，将自动转为「激进限价 bracket」，止损用 stop-limit。`;
+    `确认【市价买入】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
+  if (!isRth) msg += `\n\n⏰ 当前为${sessionLabel}（时段外）：市价不可用，将自动转「激进限价 bracket」，止损用 stop-limit。`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
-  showMarketResult(await postMarket('/api/order/market'));
+  showMarketResult(await post('/api/order/market', marketBody()));
 }
+$('previewBtn').onclick = preview;
+$('buyBtn').onclick = buyLimit;
 $('buyMktBtn').onclick = buyMarket;
 
 // --- 撤单 / 全平 ---
@@ -358,19 +417,17 @@ async function flattenAll() {
 $('cancelAllBtn').onclick = cancelAll;
 $('flattenBtn').onclick = flattenAll;
 
-// --- 键盘热键：b 市价 / l 限价 / f 全平 / c 撤单（焦点在输入框时不触发）---
+// --- 键盘热键：b 市价 / l 限价 / f 全平 / c 撤单（输入框聚焦时不触发）---
 document.addEventListener('keydown', (e) => {
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
-  if (k === 'b') buyMarket();
-  else if (k === 'l') buyLimit();
-  else if (k === 'f') flattenAll();
-  else if (k === 'c') cancelAll();
+  if (k === 'b') buyMarket(); else if (k === 'l') buyLimit();
+  else if (k === 'f') flattenAll(); else if (k === 'c') cancelAll();
 });
 
-// WebSocket 实时推送
+// --- WebSocket 实时推送 ---
 let ws;
 function connectWS() {
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');

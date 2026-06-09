@@ -17,6 +17,34 @@ from webwatch.config import Environment, IBKRSettings, PanelConfig
 from webwatch.pricing import Target
 
 
+class _DiscFakeIB:
+    def __init__(self) -> None:
+        self.disconnected = False
+
+    def isConnected(self) -> bool:  # noqa: N802
+        return True
+
+    def disconnect(self) -> None:
+        self.disconnected = True
+
+
+class TestConnectDisconnectsFirst:
+    async def test_reconnect_disconnects_existing_first(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 重连前必须先断开旧连接，否则同一 clientId 自我冲突。
+        async def boom(*a: object, **k: object) -> None:
+            raise RuntimeError("no gateway")
+
+        monkeypatch.setattr("webwatch.broker.connect_paper_async", boom)
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        old = _DiscFakeIB()
+        bm._ib = old  # type: ignore[assignment]
+        await bm.connect()  # 应先断 old，再尝试新连接（新连接因 boom 失败）
+        assert old.disconnected is True
+        assert bm.is_connected() is False
+
+
 class TestIsLiveAndSnapshot:
     def test_is_live_reflects_environment(self) -> None:
         paper = BrokerManager(IBKRSettings(environment=Environment.PAPER), PanelConfig({}))
