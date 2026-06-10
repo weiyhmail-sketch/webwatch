@@ -47,6 +47,16 @@ def round_to_tick(
     return (ticks * tick).quantize(tick)
 
 
+def _round_leg(raw: Decimal, rounding: str) -> Decimal:
+    """腿价取整：tick 按**该价格自身**价位取，而非入场价的价位。
+
+    跨 $1 边界时两者不同：entry<$1（tick=0.0001）而保护价 ≥$1 时，沿用 entry 的
+    亚分 tick 会算出 ≥$1 的亚分价，违反 Rule 612 被 IB 拒单 → 模式A 触发紧急平仓、
+    模式B 静默缺腿，都是裸仓风险。
+    """
+    return round_to_tick(raw, min_tick(raw), rounding)
+
+
 # --------------------------------------------------------------------------
 # Target —— 止盈/止损目标的多种表达方式
 # --------------------------------------------------------------------------
@@ -138,15 +148,15 @@ def compute_bracket(
     tp_below = tp_delta < tick
 
     if side is Side.LONG:
-        take_profit_price = round_to_tick(entry + tp_delta, tick, ROUND_UP)
+        take_profit_price = _round_leg(entry + tp_delta, ROUND_UP)
         if take_profit_price <= entry:
             take_profit_price = (entry + tick).quantize(tick)
-        stop_loss_price = round_to_tick(entry - sl_delta, tick, ROUND_DOWN)
+        stop_loss_price = _round_leg(entry - sl_delta, ROUND_DOWN)
     else:  # SHORT
-        take_profit_price = round_to_tick(entry - tp_delta, tick, ROUND_DOWN)
+        take_profit_price = _round_leg(entry - tp_delta, ROUND_DOWN)
         if take_profit_price >= entry:
             take_profit_price = (entry - tick).quantize(tick)
-        stop_loss_price = round_to_tick(entry + sl_delta, tick, ROUND_UP)
+        stop_loss_price = _round_leg(entry + sl_delta, ROUND_UP)
 
     # 防御：目标过大（如低价股上 profit_usd 反推每股距离 > 入场价）会算出 <=0 的保护价。
     # 负/零保护价绝不能发到 IB（会被拒 → 裸仓风险），直接拒绝。
@@ -237,8 +247,8 @@ def aggressive_limit(ref_price: Decimal, ticks: int, *, side: Side = Side.LONG) 
     tick = min_tick(ref_price)
     offset = tick * ticks
     if side is Side.LONG:
-        return round_to_tick(ref_price + offset, tick, ROUND_UP)
-    return round_to_tick(ref_price - offset, tick, ROUND_DOWN)
+        return _round_leg(ref_price + offset, ROUND_UP)
+    return _round_leg(ref_price - offset, ROUND_DOWN)
 
 
 def stop_limit_price(stop_price: Decimal, offset_pct: Decimal, *, side: Side = Side.LONG) -> Decimal:
@@ -251,11 +261,10 @@ def stop_limit_price(stop_price: Decimal, offset_pct: Decimal, *, side: Side = S
         raise ValueError(f"stop_price must be positive finite, got {stop_price}")
     if not offset_pct.is_finite() or offset_pct < 0:
         raise ValueError(f"offset_pct must be >= 0 finite, got {offset_pct}")
-    tick = min_tick(stop_price)
     if side is Side.LONG:
-        limit = round_to_tick(stop_price * (Decimal(1) - offset_pct), tick, ROUND_DOWN)
+        limit = _round_leg(stop_price * (Decimal(1) - offset_pct), ROUND_DOWN)
     else:
-        limit = round_to_tick(stop_price * (Decimal(1) + offset_pct), tick, ROUND_UP)
+        limit = _round_leg(stop_price * (Decimal(1) + offset_pct), ROUND_UP)
     if limit <= 0:
         raise ValueError(f"stop-limit 保护价非正（{limit}）")
     return limit

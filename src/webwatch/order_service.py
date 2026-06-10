@@ -69,6 +69,8 @@ def plan_limit_bracket(
         raise OrderRejected("代码为空")
     if quantity <= 0:
         raise OrderRejected(f"数量必须为正：{quantity}")
+    if quantity > panel.max_order_shares:
+        raise OrderRejected(f"股数 {quantity} 超过单笔上限 {panel.max_order_shares} 股")
     if not entry_limit.is_finite() or entry_limit <= 0:
         raise OrderRejected(f"限价必须为正且有效：{entry_limit}")
     # 限价必须落在 IBKR 有效 tick 上，否则 IB 会拒单。
@@ -153,6 +155,8 @@ def plan_market_order(
         raise OrderRejected("代码为空")
     if quantity <= 0:
         raise OrderRejected(f"数量必须为正：{quantity}")
+    if quantity > panel.max_order_shares:
+        raise OrderRejected(f"股数 {quantity} 超过单笔上限 {panel.max_order_shares} 股")
     if not ref_price.is_finite() or ref_price <= 0:
         raise OrderRejected(f"参考价必须为正且有效：{ref_price}")
 

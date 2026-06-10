@@ -80,6 +80,20 @@ class TestPlanRejections:
         with pytest.raises(OrderRejected):
             _plan(entry_limit=Decimal("5"), quantity=10, stop_loss=Target.profit_usd(Decimal("100")))
 
+    def test_share_cap_rejected(self) -> None:
+        # 绝对股数上限（第二道闸）：仙股下 notional 上限拦不住超大手数
+        # （$0.01 × 20 万股 notional 才 $2000），必须独立拒掉。
+        with pytest.raises(OrderRejected, match="股数"):
+            _plan(entry_limit=Decimal("0.01"), quantity=200_000)
+
+    def test_share_cap_market_rejected(self) -> None:
+        with pytest.raises(OrderRejected, match="股数"):
+            plan_market_order(
+                symbol="pny", quantity=200_000, ref_price=Decimal("0.01"),
+                take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
+                panel=PANEL, side=Side.LONG,
+            )
+
 
 class TestPlanTickRounding:
     def test_entry_rounded_to_tick(self) -> None:

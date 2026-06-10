@@ -162,6 +162,8 @@ class PanelConfig:
         self.stop_limit_offset_pct = Decimal(str(raw.get("stop_limit_offset_pct", "0.005")))
         risk = raw.get("risk", {}) or {}
         self.max_order_notional_usd = Decimal(str(risk.get("max_order_notional_usd", "5000")))
+        # 单笔绝对股数上限（第二道闸）：仙股下 notional 上限拦不住超大手数。
+        self.max_order_shares = int(risk.get("max_order_shares", 100_000))
         # 单笔最大亏损上限（占 NAV 比例），镜像 scalper 0.5% 语义。
         self.max_position_risk_pct = Decimal(str(risk.get("max_position_risk_pct", "0.005")))
         # PDT 提示阈值：净值低于此值受日内交易限制。

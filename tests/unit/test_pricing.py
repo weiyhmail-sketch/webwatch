@@ -126,6 +126,45 @@ class TestComputeBracketPct:
         assert b.take_profit == Decimal("99.80")
         assert b.stop_loss == Decimal("100.40")
 
+    def test_short_off_tick_rounding_directions(self) -> None:
+        # off-tick 用例（落点不在 tick 上，区分取整方向；on-tick 用例测不出方向）：
+        # SHORT TP raw=99.796 → 向下取整 99.79（目标不缩水，HALF_UP 会得 99.80）
+        # SHORT SL raw=100.204 → 向上取整 100.21（止损不变紧，HALF_UP 会得 100.20）
+        b = compute_bracket(
+            Decimal("100"),
+            10,
+            Target.pct(Decimal("0.00204")),
+            Target.pct(Decimal("0.00204")),
+            side=Side.SHORT,
+        )
+        assert b.take_profit == Decimal("99.79")
+        assert b.stop_loss == Decimal("100.21")
+
+    def test_protection_crossing_dollar_uses_penny_tick(self) -> None:
+        # 跨 $1 边界：entry<$1（tick=0.0001）但 SHORT 止损算到 ≥$1 ——
+        # Rule 612 禁止 ≥$1 出现亚分价，必须按 $0.01 取整，否则 IB 拒单 → 裸仓风险。
+        b = compute_bracket(
+            Decimal("0.998"),
+            100,
+            Target.pct(Decimal("0.002")),
+            Target.pct(Decimal("0.005")),
+            side=Side.SHORT,
+        )
+        # SL raw = 0.998*1.005 = 1.00299 → penny 向上 → 1.01（不是亚分价 1.0030）
+        assert b.stop_loss == Decimal("1.01")
+        # TP 仍在 <$1 区域 → 保持 0.0001 tick：0.996004 → 向下 → 0.9960
+        assert b.take_profit == Decimal("0.9960")
+
+    def test_long_tp_crossing_dollar_uses_penny_tick(self) -> None:
+        # LONG entry<$1、TP 跨到 ≥$1：1.003995 → penny 向上 → 1.01
+        b = compute_bracket(
+            Decimal("0.999"),
+            100,
+            Target.pct(Decimal("0.005")),
+            Target.pct(Decimal("0.002")),
+        )
+        assert b.take_profit == Decimal("1.01")
+
 
 class TestComputeBracketPriceOffset:
     def test_dollar_offset_long(self) -> None:
@@ -218,6 +257,10 @@ class TestAggressiveLimit:
         with pytest.raises(ValueError):
             aggressive_limit(Decimal("0"), 3)
 
+    def test_crossing_dollar_uses_penny_tick(self) -> None:
+        # ref<$1 + offset 跨到 ≥$1：1.0002 不是合法价位，按 penny 向上 → 1.01
+        assert aggressive_limit(Decimal("0.9999"), 3, side=Side.LONG) == Decimal("1.01")
+
 
 class TestStopLimitPrice:
     def test_long_limit_below_stop(self) -> None:
@@ -230,6 +273,10 @@ class TestStopLimitPrice:
     def test_rejects_negative_offset(self) -> None:
         with pytest.raises(ValueError):
             stop_limit_price(Decimal("100"), Decimal("-0.1"))
+
+    def test_crossing_dollar_uses_penny_tick(self) -> None:
+        # SHORT 止损限价跨 $1：0.999*1.005=1.003995 → penny 向上 → 1.01（非亚分价）
+        assert stop_limit_price(Decimal("0.999"), Decimal("0.005"), side=Side.SHORT) == Decimal("1.01")
 
 
 class TestSharesForNotional:

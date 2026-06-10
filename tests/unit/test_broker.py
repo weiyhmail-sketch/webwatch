@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import namedtuple
 from decimal import Decimal
 from types import SimpleNamespace
@@ -154,16 +155,35 @@ class _FakeContract:
 
 
 class FakeIB:
-    def __init__(self) -> None:
-        self.placed: list[tuple[Any, int]] = []
+    """模式B fake：三腿状态可配置（验证 bracket 被 IB 接受 / 拒腿 / 母单先成交）。"""
+
+    def __init__(
+        self,
+        *,
+        parent_status: str = "Submitted",
+        tp_status: str = "Submitted",
+        sl_status: str = "Submitted",
+        parent_filled: int = 0,
+        parent_avg: float = 0.0,
+    ) -> None:
+        self.placed: list[tuple[Any, Any]] = []
+        self.cancelled: list[int] = []
         self.last_args: tuple[Any, ...] | None = None
         self.last_bracket: Any = None
+        self.parent_status = parent_status
+        self.tp_status = tp_status
+        self.sl_status = sl_status
+        self.parent_filled = parent_filled
+        self.parent_avg = parent_avg
 
     def isConnected(self) -> bool:  # noqa: N802 — 匹配 ib_async API
         return True
 
     async def qualifyContractsAsync(self, contract: Any) -> list[Any]:  # noqa: N802
         return [contract]
+
+    def cancelOrder(self, order: Any) -> None:  # noqa: N802
+        self.cancelled.append(order.orderId)
 
     def bracketOrder(  # noqa: N802
         self, action: str, qty: float, lp: float, tp: float, sl: float
@@ -173,8 +193,16 @@ class FakeIB:
         return self.last_bracket
 
     def placeOrder(self, contract: Any, order: Any) -> Any:  # noqa: N802
-        self.placed.append((contract.symbol, order.orderId))
-        return _FakeTrade(order)
+        self.placed.append((contract.symbol, order))
+        oid = getattr(order, "orderId", 0)
+        if oid == 101:
+            return _Trade2(order, _Status(self.parent_status, self.parent_filled, self.parent_avg))
+        if oid == 102:
+            return _Trade2(order, _Status(self.tp_status))
+        if oid == 103:
+            return _Trade2(order, _Status(self.sl_status))
+        # 其余（紧急平仓 MKT）：立即全量成交
+        return _Trade2(order, _Status("Filled", getattr(order, "totalQuantity", 0), 100.0))
 
 
 class TestPlaceLimitBracket:
@@ -227,6 +255,19 @@ class TestPlaceLimitBracket:
         assert b.takeProfit.tif == "GTC"
         assert b.stopLoss.tif == "GTC"
 
+    async def test_rth_bracket_children_use_gtc(self) -> None:
+        # RTH 分支保护腿也必须 GTC：临近收盘成交后 DAY 子单收盘过期 → 隔夜裸仓。
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        fake = FakeIB()
+        bm._ib = fake  # type: ignore[assignment]
+        await bm.place_limit_bracket(
+            symbol="aapl", side=Side.LONG, quantity=100,
+            entry_limit=Decimal("100"), take_profit=Decimal("100.20"), stop_loss=Decimal("99.60"),
+        )
+        b = fake.last_bracket
+        assert b.takeProfit.tif == "GTC"
+        assert b.stopLoss.tif == "GTC"
+
     async def test_raises_when_disconnected(self) -> None:
         bm = BrokerManager(IBKRSettings(), PanelConfig({}))
         try:
@@ -242,6 +283,53 @@ class TestPlaceLimitBracket:
             assert "未连接" in str(exc)
         else:
             raise AssertionError("应在未连接时抛 RuntimeError")
+
+
+class TestLimitBracketVerification:
+    """模式B 挂出后验证：transmit 链只保证一起提交，不保证全被接受（P1 修复回归）。"""
+
+    def _bm(self, fake: FakeIB) -> BrokerManager:
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = fake  # type: ignore[assignment]
+        bm._protect_timeout_s = 0.2  # type: ignore[attr-defined]
+        return bm
+
+    async def _place(self, bm: BrokerManager, quantity: int = 100) -> dict[str, Any]:
+        return await bm.place_limit_bracket(
+            symbol="aapl", side=Side.LONG, quantity=quantity,
+            entry_limit=Decimal("100"), take_profit=Decimal("100.20"), stop_loss=Decimal("99.60"),
+        )
+
+    async def test_child_rejected_cancels_all_legs(self) -> None:
+        # 子单（止损腿）被 IB 拒 → 撤掉全部三腿 + 抛错，绝不留"母单 working 无保护"。
+        fake = FakeIB(sl_status="Cancelled")
+        with pytest.raises(RuntimeError, match="bracket"):
+            await self._place(self._bm(fake))
+        assert {101, 102, 103} <= set(fake.cancelled)
+
+    async def test_child_rejected_after_parent_fill_flattens(self) -> None:
+        # 母单已成交但保护腿被拒 → 红线 #3：必须紧急平仓 + ProtectionFailed。
+        fake = FakeIB(parent_status="Filled", parent_filled=100, parent_avg=100.0,
+                      sl_status="Cancelled")
+        with pytest.raises(ProtectionFailed) as ei:
+            await self._place(self._bm(fake))
+        flats = [o for _, o in fake.placed if getattr(o, "orderType", "") == "MKT"]
+        assert flats and flats[0].totalQuantity == 100  # 按母单成交量平
+        assert ei.value.flatten["action"] == "SELL"
+
+    async def test_pending_timeout_cancels_all_legs(self) -> None:
+        # 全部腿停在 PendingSubmit 超时 → fail-closed：撤三腿 + 抛错（母单未成交，无裸仓）。
+        fake = FakeIB(parent_status="PendingSubmit", tp_status="PendingSubmit",
+                      sl_status="PendingSubmit")
+        with pytest.raises(RuntimeError, match="超时"):
+            await self._place(self._bm(fake))
+        assert {101, 102, 103} <= set(fake.cancelled)
+
+    async def test_accepted_bracket_returns_normally(self) -> None:
+        fake = FakeIB()  # 三腿都 Submitted
+        res = await self._place(self._bm(fake))
+        assert res["parent_id"] == 101
+        assert fake.cancelled == []
 
 
 # --- fake IB for 市价 + 保护单 -----------------------------------------------
@@ -274,20 +362,24 @@ class MarketFakeIB:
         fill_price: float = 200.0,
         entry_filled: bool = True,
         entry_done: bool = True,
+        entry_fill_qty: int | None = None,
         tp_status: str = "Submitted",
         sl_status: str = "Submitted",
         protection_raises: bool = False,
         sl_raises: bool = False,
         flatten_raises: bool = False,
+        flatten_ioc_cancels: bool = False,
     ) -> None:
         self.fill_price = fill_price
         self.entry_filled = entry_filled
         self.entry_done = entry_done
+        self.entry_fill_qty = entry_fill_qty  # None=全量成交；设值=IOC 部分成交
         self.tp_status = tp_status
         self.sl_status = sl_status
         self.protection_raises = protection_raises
         self.sl_raises = sl_raises
         self.flatten_raises = flatten_raises
+        self.flatten_ioc_cancels = flatten_ioc_cancels  # 紧急平仓 IOC 被整单撤掉（停牌/无流动性）
         self.placed: list[Any] = []
         self.cancelled: list[int] = []
         self._id = 0
@@ -311,11 +403,14 @@ class MarketFakeIB:
             if not self.entry_done:  # 入场单卡在非终态 → 模拟超时
                 return _Trade2(order, _Status("PreSubmitted", 0, 0.0))
             if self.entry_filled:
-                return _Trade2(order, _Status("Filled", order.totalQuantity, self.fill_price))
+                qty = self.entry_fill_qty if self.entry_fill_qty is not None else order.totalQuantity
+                return _Trade2(order, _Status("Filled", qty, self.fill_price))
             return _Trade2(order, _Status("Cancelled", 0, 0.0))
         if order.orderType == "MKT":  # 后续 MKT = 紧急平仓
             if self.flatten_raises:
                 raise RuntimeError("broker rejected flatten")
+            if self.flatten_ioc_cancels:
+                return _Trade2(order, _Status("Cancelled", 0, 0.0))
             return _Trade2(order, _Status("Filled", order.totalQuantity, self.fill_price))
         if self.protection_raises:
             raise RuntimeError("broker rejected protection")
@@ -327,7 +422,7 @@ class MarketFakeIB:
 
 
 class MarketFakeAdapter:
-    """fake 适配器：_emergency_flatten 用 get_position 对账真实持仓。"""
+    """fake 适配器（提供 get_position 供持仓读取；紧急平仓本身按 filled 平、不读它）。"""
 
     def __init__(self, position_qty: int = 10, position_side: Side = Side.LONG) -> None:
         self.position_qty = position_qty
@@ -484,6 +579,90 @@ class TestMarketWithProtection:
                 symbol="aapl", side=Side.LONG, quantity=10,
                 take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
             )
+        # best-effort：抛错前尝试撤掉状态未知的入场单，消掉"稍后才成交"的尾部风险
+        assert fake.placed[0].orderId in fake.cancelled
+
+    async def test_partial_fill_places_protection_for_filled_qty(self) -> None:
+        # IOC 部分成交：保护单必须按实际成交量挂，不能按请求数量
+        fake = MarketFakeIB(fill_price=200.0, entry_fill_qty=60)
+        bm = _bm_with(fake)
+        res = await bm.place_market_with_protection(
+            symbol="aapl", side=Side.LONG, quantity=100,
+            take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
+        )
+        assert res["filled"] == 60
+        legs = [o for o in fake.placed if o.orderType in ("LMT", "STP")]
+        assert legs and all(o.totalQuantity == 60 for o in legs)
+
+    async def test_partial_fill_bracket_error_flattens_not_leaks(self) -> None:
+        # 【P0 回归·审计 2026-06-10】PROFIT_USD 止损 + IOC 部分成交：每股距离 = value/filled
+        # 被放大 → compute_bracket 抛 ValueError。此刻入场已成交，必须紧急平仓 + ProtectionFailed，
+        # 绝不能让异常裸冒泡变成"已拒单"（实际裸仓、无平仓无告警）。
+        # 100 股 @$5 止损 $400：plan 时每股 $4 合法；只成交 10 股 → 每股 $40 → SL 负 → ValueError。
+        fake = MarketFakeIB(fill_price=5.0, entry_fill_qty=10)
+        bm = _bm_with(fake)
+        with pytest.raises(ProtectionFailed) as ei:
+            await bm.place_market_with_protection(
+                symbol="pny", side=Side.LONG, quantity=100,
+                take_profit=Target.pct(Decimal("0.002")),
+                stop_loss=Target.profit_usd(Decimal("400")),
+            )
+        assert ei.value.filled == 10
+        mkts = [o for o in fake.placed if o.orderType == "MKT"]
+        assert len(mkts) == 2 and mkts[1].totalQuantity == 10  # 入场 + 按实际成交量紧急平仓
+
+    async def test_short_entry_sell_protection_buy(self) -> None:
+        # SHORT 全链路：入场 SELL，OCA 两腿 BUY 回补，TP 在下方 / SL 在上方
+        fake = MarketFakeIB(fill_price=50.0)
+        bm = _bm_with(fake)
+        res = await bm.place_market_with_protection(
+            symbol="aapl", side=Side.SHORT, quantity=10,
+            take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
+        )
+        assert fake.placed[0].action == "SELL"
+        legs = [o for o in fake.placed if o.orderType in ("LMT", "STP")]
+        assert legs and all(o.action == "BUY" for o in legs)
+        assert Decimal(res["take_profit"]) < Decimal("50") < Decimal(res["stop_loss"])
+
+    async def test_short_protection_failure_flattens_with_buy(self) -> None:
+        # SHORT 保护失败 → 紧急平仓方向必须是 BUY 回补
+        fake = MarketFakeIB(fill_price=50.0, tp_status="Cancelled", sl_status="Cancelled")
+        bm = _bm_with(fake)
+        with pytest.raises(ProtectionFailed) as ei:
+            await bm.place_market_with_protection(
+                symbol="aapl", side=Side.SHORT, quantity=10,
+                take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
+            )
+        assert ei.value.flatten["action"] == "BUY"
+        mkts = [o for o in fake.placed if o.orderType == "MKT"]
+        assert mkts[1].action == "BUY"
+
+    async def test_protection_stuck_pending_times_out_and_flattens(self) -> None:
+        # 保护腿卡在 PendingSubmit 超时（未确认上簿）→ fail-closed：撤两腿 + 平仓
+        fake = MarketFakeIB(tp_status="PendingSubmit", sl_status="PendingSubmit")
+        bm = _bm_with(fake)
+        bm._protect_timeout_s = 0.1  # type: ignore[attr-defined]
+        with pytest.raises(ProtectionFailed, match="超时"):
+            await bm.place_market_with_protection(
+                symbol="aapl", side=Side.LONG, quantity=10,
+                take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
+            )
+        assert len(fake.cancelled) == 2  # 两条保护腿先撤
+        assert sum(1 for o in fake.placed if o.orderType == "MKT") == 2  # 入场 + 平仓
+
+    async def test_flatten_ioc_unfilled_reports_failed_not_lies(self) -> None:
+        # 【P1 回归】紧急平仓 IOC 被整单撤掉（停牌/LULD/无流动性）→ 仓位仍在。
+        # 绝不能谎报"已平仓"——必须 flatten.failed=True + 醒目手动平仓提示。
+        fake = MarketFakeIB(tp_status="Cancelled", sl_status="Cancelled", flatten_ioc_cancels=True)
+        bm = _bm_with(fake)
+        with pytest.raises(ProtectionFailed) as ei:
+            await bm.place_market_with_protection(
+                symbol="aapl", side=Side.LONG, quantity=10,
+                take_profit=Target.pct(Decimal("0.002")), stop_loss=Target.pct(Decimal("0.004")),
+            )
+        assert ei.value.flatten.get("failed") is True
+        assert "手动" in ei.value.flatten["note"]
+        assert ei.value.flatten["filled"] == 0  # 实际平掉 0 股
 
 
 class FakeAdapter:
@@ -548,3 +727,55 @@ class TestRiskInputsCancelFlatten:
         actions = {r["symbol"]: r["action"] for r in result["flattened"]}
         assert actions == {"AAPL": "SELL", "TSLA": "BUY"}
         assert sum(1 for o in fake.placed if o.orderType == "MKT") == 2
+
+    async def test_flatten_all_reports_actual_fills(self) -> None:
+        # 全平必须回报每个平仓单的实际成交结果（IOC 可能被撤），不得默认"已平"
+        adapter = FakeAdapter(positions=[_pos("AAPL", Side.LONG, 10)])
+        fake = MarketFakeIB()
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = fake  # type: ignore[assignment]
+        bm._adapter = adapter  # type: ignore[assignment]
+        result = await bm.flatten_all()
+        row = result["flattened"][0]
+        assert row["filled"] == 10
+        assert row["failed"] is False
+
+    async def test_flatten_all_flags_unfilled_close(self) -> None:
+        # 平仓 IOC 整单被撤 → failed=True，前端可醒目提示"未平干净"
+        adapter = FakeAdapter(positions=[_pos("AAPL", Side.LONG, 10)])
+        fake = MarketFakeIB(flatten_ioc_cancels=True)
+        fake._entry_done = True  # 没有入场单：第一张 MKT 就是平仓单
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = fake  # type: ignore[assignment]
+        bm._adapter = adapter  # type: ignore[assignment]
+        result = await bm.flatten_all()
+        row = result["flattened"][0]
+        assert row["filled"] == 0
+        assert row["failed"] is True
+
+
+class TestErrorRedaction:
+    def test_ib_error_masks_account_number(self) -> None:
+        # 红线 #5：错误文本可能携带账户号（U/DU+数字），进 last_error 前必须脱敏
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._on_ib_error(1, 321, "Order rejected for account DU1234567 (U7654321)", None)
+        assert bm._last_error is not None
+        assert "DU1234567" not in bm._last_error
+        assert "U7654321" not in bm._last_error
+        assert "DU***" in bm._last_error
+
+
+class TestConnectRespectsOrderLock:
+    async def test_connect_waits_for_order_lock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 下单持锁期间 /api/reconnect 不得换掉 self._ib（撤单/紧急平仓会打到错误连接）
+        async def fake_connect(*a: object, **k: object) -> None:
+            return None
+
+        monkeypatch.setattr("webwatch.broker.connect_paper_async", fake_connect)
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        await bm._order_lock.acquire()
+        try:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(bm.connect(), 0.1)
+        finally:
+            bm._order_lock.release()

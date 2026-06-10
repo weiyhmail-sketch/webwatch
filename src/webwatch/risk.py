@@ -25,6 +25,10 @@ from webwatch.config import PanelConfig
 BLOCK = "block"
 WARN = "warn"
 
+# IB 空头保证金的低价股下限：每股至少按 $2.50 计（IB 实际规则更复杂，这里取保守近似）。
+# 多头不适用。
+_SHORT_MIN_MARGIN_PER_SHARE = Decimal("2.50")
+
 
 @dataclass(frozen=True)
 class RiskFinding:
@@ -49,6 +53,9 @@ def assess(
     # 任何直接调用 assess() 的未来路径不能让 NaN/Inf 静默放行（NaN 的所有 `>` 比较为 False）。
     if not entry.is_finite() or not stop_loss.is_finite():
         return [RiskFinding("non_finite_price", BLOCK, f"价格非有限值（entry={entry}, stop={stop_loss}）")]
+    # 同为防御深度：负/零数量使 notional 与 max_loss 全为负 → 所有 `>` 比较 False 静默放行。
+    if quantity <= 0:
+        return [RiskFinding("non_positive_quantity", BLOCK, f"数量必须为正：{quantity}")]
     notional = entry * quantity
     # 单笔最大亏损（多头：entry-stop；空头：stop-entry）
     max_loss = (entry - stop_loss) * quantity if side is Side.LONG else (stop_loss - entry) * quantity
@@ -64,12 +71,27 @@ def assess(
                 )
             )
 
-    if buying_power is not None and notional > buying_power:
+    # 购买力检查：多头按 notional；空头按保证金近似（低价股每股 $2.50 下限——
+    # 按多头 notional 估会**低估**低价股空头保证金，漏拦超限单）。
+    bp_required = notional
+    if side is Side.SHORT:
+        margin_base = entry if entry >= _SHORT_MIN_MARGIN_PER_SHARE else _SHORT_MIN_MARGIN_PER_SHARE
+        bp_required = margin_base * quantity
+        findings.append(
+            RiskFinding(
+                "short_margin_approx",
+                WARN,
+                f"空头保证金为近似估算（低价股按每股 ${_SHORT_MIN_MARGIN_PER_SHARE} 下限计 "
+                f"${bp_required}），且未检查可借券(HTB)；实际以 IB 为准",
+            )
+        )
+    if buying_power is not None and bp_required > buying_power:
         findings.append(
             RiskFinding(
                 "buying_power",
                 BLOCK,
-                f"下单金额 ${notional} 超过购买力 ${buying_power}",
+                f"下单所需 ${bp_required}（{'空头保证金近似' if side is Side.SHORT else '金额'}）"
+                f"超过购买力 ${buying_power}",
             )
         )
 

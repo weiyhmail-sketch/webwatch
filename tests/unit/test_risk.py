@@ -74,3 +74,43 @@ class TestNonFiniteDefense:
     def test_inf_stop_blocks(self) -> None:
         f = _assess(stop_loss=Decimal("inf"))
         assert any(x.code == "non_finite_price" and x.severity == BLOCK for x in f)
+
+
+class TestQuantityDefense:
+    def test_negative_quantity_blocks(self) -> None:
+        # 防御深度：负数量使 notional/max_loss 全为负 → 所有 `>` 比较 False 静默放行。
+        # 与 non-finite 防御同理，assess 自身必须拦住。
+        f = _assess(quantity=-100)
+        assert any(x.code == "non_positive_quantity" and x.severity == BLOCK for x in f)
+
+    def test_zero_quantity_blocks(self) -> None:
+        f = _assess(quantity=0)
+        assert any(x.code == "non_positive_quantity" and x.severity == BLOCK for x in f)
+
+
+class TestShortMargin:
+    def test_short_always_warns_margin_approx(self) -> None:
+        # 空头保证金是近似估算（且不查可借券）——必须提示用户
+        f = _assess(side=Side.SHORT, stop_loss=Decimal("100.20"))
+        assert any(x.code == "short_margin_approx" and x.severity == WARN for x in f)
+
+    def test_long_has_no_short_warning(self) -> None:
+        f = _assess()
+        assert not any(x.code == "short_margin_approx" for x in f)
+
+    def test_short_low_price_margin_floor_blocks(self) -> None:
+        # IB 空头低价股每股最低 $2.50 保证金：entry=$1 × 1000 股 notional=$1000 < BP $2000，
+        # 但保证金 ≥ $2500 > BP → 必须 BLOCK（按多头 notional 估会低估、漏拦）。
+        f = _assess(
+            entry=Decimal("1"), stop_loss=Decimal("1.01"), quantity=1000,
+            side=Side.SHORT, nav=Decimal("1000000"), buying_power=Decimal("2000"),
+        )
+        assert any(x.code == "buying_power" and x.severity == BLOCK for x in f)
+
+    def test_long_low_price_unaffected_by_floor(self) -> None:
+        # 多头不适用 $2.50 下限：同样参数 LONG 不应被购买力拦截
+        f = _assess(
+            entry=Decimal("1"), stop_loss=Decimal("0.99"), quantity=1000,
+            side=Side.LONG, nav=Decimal("1000000"), buying_power=Decimal("2000"),
+        )
+        assert not any(x.code == "buying_power" for x in f)

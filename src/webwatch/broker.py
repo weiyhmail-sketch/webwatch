@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import re
 from decimal import Decimal
 from typing import Any, NoReturn, Protocol, TypeVar
 
@@ -72,6 +73,15 @@ class EntryUncertain(Exception):
     def __init__(self, status: str) -> None:
         super().__init__(f"入场单超时未达终态（status={status}），状态未知，请立即检查持仓与挂单！")
         self.status = status
+
+
+# 账户号样式（U/DU + 数字）。错误文本可能携带（IBKR 异常/连接信息），外泄前必须脱敏。
+_ACCOUNT_RE = re.compile(r"\b(D?U)\d{4,}\b")
+
+
+def _redact(text: str) -> str:
+    """错误文本脱敏：账户号绝不进前端/日志（红线 #5）。"""
+    return _ACCOUNT_RE.sub(r"\1***", text)
 
 
 def _finite(value: Any) -> float | None:
@@ -171,55 +181,60 @@ class BrokerManager:
 
         重连前**先断开已有连接**，否则新连接复用同一 clientId 会与旧连接冲突、连接超时
         （旧连接还占着 clientId）。
+
+        进 ``_order_lock``：下单持锁期间绝不能换掉 ``self._ib``，否则进行中的撤单/
+        紧急平仓会打到错误连接（裸仓风险）。
         """
         s = self._settings
-        # 先清旧连接，释放 clientId，避免重连时自我冲突。
-        if self._ib is not None and self._ib.isConnected():
-            with contextlib.suppress(Exception):
-                self._ib.disconnect()
-        self._quotes.detach()
-        self._ib = None
-        self._adapter = None
-        ib = IB()
-        try:
-            if s.environment is Environment.PAPER:
-                await connect_paper_async(ib, s.ibkr_host, s.ibkr_port, s.ibkr_client_id)
-            else:
-                await connect_live_async(
-                    ib,
-                    s.ibkr_host,
-                    s.ibkr_port,
-                    s.ibkr_client_id,
-                    expected_account=s.ibkr_account or None,
-                )
-            ib.errorEvent += self._on_ib_error
-            self._ib = ib
-            # 未填真实账户时自动用 Gateway 探测到的账户做 scoping。
-            account = resolve_account(s.ibkr_account, list(ib.managedAccounts()))
-            self._account = account
-            self._adapter = IbBrokerAdapter(ib, paper_account=account)
-            self._last_error = None
-            # 订阅账户盈亏（当日 / 已实现 / 浮动）；流式更新，snapshot 里读。
-            with contextlib.suppress(Exception):
-                ib.reqPnL(account)
-            # 行情：绑定连接 + 重订 watchlist
-            self._quotes.attach(ib)
-            await self._quotes.resubscribe_all()
-            log.info("connected to %s gateway", s.environment.value)
-        except Exception as exc:
-            self._last_error = f"{type(exc).__name__}: {exc}"
-            log.warning("connect failed: %s", self._last_error)
-            if ib.isConnected():
-                ib.disconnect()
+        async with self._order_lock:
+            # 先清旧连接，释放 clientId，避免重连时自我冲突。
+            if self._ib is not None and self._ib.isConnected():
+                with contextlib.suppress(Exception):
+                    self._ib.disconnect()
+            self._quotes.detach()
             self._ib = None
             self._adapter = None
+            ib = IB()
+            try:
+                if s.environment is Environment.PAPER:
+                    await connect_paper_async(ib, s.ibkr_host, s.ibkr_port, s.ibkr_client_id)
+                else:
+                    await connect_live_async(
+                        ib,
+                        s.ibkr_host,
+                        s.ibkr_port,
+                        s.ibkr_client_id,
+                        expected_account=s.ibkr_account or None,
+                    )
+                ib.errorEvent += self._on_ib_error
+                self._ib = ib
+                # 未填真实账户时自动用 Gateway 探测到的账户做 scoping。
+                account = resolve_account(s.ibkr_account, list(ib.managedAccounts()))
+                self._account = account
+                self._adapter = IbBrokerAdapter(ib, paper_account=account)
+                self._last_error = None
+                # 订阅账户盈亏（当日 / 已实现 / 浮动）；流式更新，snapshot 里读。
+                with contextlib.suppress(Exception):
+                    ib.reqPnL(account)
+                # 行情：绑定连接 + 重订 watchlist
+                self._quotes.attach(ib)
+                await self._quotes.resubscribe_all()
+                log.info("connected to %s gateway", s.environment.value)
+            except Exception as exc:  # noqa: BLE001 — 连接失败不崩面板，错误进 last_error 展示
+                self._last_error = _redact(f"{type(exc).__name__}: {exc}")
+                log.warning("connect failed: %s", self._last_error)
+                if ib.isConnected():
+                    ib.disconnect()
+                self._ib = None
+                self._adapter = None
 
     async def disconnect(self) -> None:
-        if self._ib is not None and self._ib.isConnected():
-            self._ib.disconnect()
-        self._quotes.detach()
-        self._ib = None
-        self._adapter = None
+        async with self._order_lock:
+            if self._ib is not None and self._ib.isConnected():
+                self._ib.disconnect()
+            self._quotes.detach()
+            self._ib = None
+            self._adapter = None
 
     def _on_ib_error(
         self,
@@ -232,8 +247,8 @@ class BrokerManager:
         if error_code in _BENIGN_IB_CODES:
             return
         sym = f" [{contract.symbol}]" if contract is not None and hasattr(contract, "symbol") else ""
-        self._last_error = f"IB {error_code}:{sym} {error_string}"
-        log.warning("IB error %s: %s", error_code, error_string)
+        self._last_error = _redact(f"IB {error_code}:{sym} {error_string}")
+        log.warning("IB error %s: %s", error_code, _redact(error_string))
 
     # ---- 报价订阅（委托给独立 QuoteService）-----------------------------
 
@@ -253,7 +268,7 @@ class BrokerManager:
         try:
             return fn()
         except Exception as exc:  # noqa: BLE001
-            self._last_error = f"{type(exc).__name__}: {exc}"
+            self._last_error = _redact(f"{type(exc).__name__}: {exc}")
             log.warning("read failed: %s", self._last_error)
             return None
 
@@ -407,11 +422,27 @@ class BrokerManager:
                 # 普通 STP → STP-LMT（时段外可用）。auxPrice(触发价) 不变，补限价。
                 bracket.stopLoss.orderType = "STP LMT"
                 bracket.stopLoss.lmtPrice = float(stop_limit)
-                # 候选-3：保护腿用 GTC，避免 DAY 单在 session 边界(如 20:00/夜盘跨界)过期 → 裸仓。
-                bracket.takeProfit.tif = "GTC"
-                bracket.stopLoss.tif = "GTC"
-            for order in bracket:
-                ib.placeOrder(contract, order)
+            # 保护腿一律 GTC（候选-3 推广到 RTH）：DAY 子单在收盘/session 边界过期 →
+            # 母单成交后隔夜裸仓。母单保持 DAY（入场限价不该 resting 过夜）。
+            bracket.takeProfit.tif = "GTC"
+            bracket.stopLoss.tif = "GTC"
+            trades = [ib.placeOrder(contract, order) for order in bracket]
+            try:
+                await self._verify_bracket_accepted(trades, timeout=self._protect_timeout_s)
+            except Exception as exc:  # noqa: BLE001 — 任何未确认都 fail-closed
+                # transmit 链只保证"一起提交"，不保证"全被接受"。子单被拒而母单 working
+                # = 成交后缺腿保护（红线 #3）。撤掉全部三腿。
+                self._cancel_trades(ib, trades)
+                # 撤单后再读母单成交量：撤前/撤中母单可能已成交（对已成交单撤单是 no-op，
+                # 但两条保护腿已被撤）→ 必须紧急平仓；未成交则安全拒单。
+                parent_filled = int(trades[0].orderStatus.filled or 0)
+                if parent_filled > 0:
+                    pavg = float(trades[0].orderStatus.avgFillPrice or 0.0)
+                    px = Decimal(str(pavg)) if math.isfinite(pavg) and pavg > 0 else entry_limit
+                    await self._flatten_or_alert(
+                        ib, contract, side, parent_filled, px, f"bracket 保护腿异常: {exc}"
+                    )
+                raise RuntimeError(f"bracket 未被 IB 接受，已撤全部三腿: {exc}") from exc
             return {
                 "symbol": contract.symbol,
                 "side": side.value,
@@ -425,6 +456,27 @@ class BrokerManager:
                 "take_profit_id": bracket.takeProfit.orderId,
                 "stop_loss_id": bracket.stopLoss.orderId,
             }
+
+    async def _verify_bracket_accepted(
+        self, trades: list[Any], timeout: float = 2.0, interval: float = 0.05
+    ) -> None:
+        """确认模式B三腿都被 IB 接受。
+
+        母单是 resting 限价单：子单在母单成交前被 IB 以 PreSubmitted 持有，属正常。
+        任一腿进入终态异常（被拒/被撤）或超时未确认 → 抛错（fail-closed，调用方撤腿）。
+        """
+        for _ in range(max(1, int(timeout / interval))):
+            statuses = [t.orderStatus.status for t in trades]
+            if any(s in _PROTECTION_BAD_STATES for s in statuses):
+                raise RuntimeError(f"bracket 腿进入异常状态: {statuses}")
+            if all(s in _PROTECTION_OK_STATES for s in statuses):
+                return
+            await asyncio.sleep(interval)
+        statuses = [t.orderStatus.status for t in trades]
+        if any(s in _PROTECTION_BAD_STATES for s in statuses) or not all(
+            s in _PROTECTION_OK_STATES for s in statuses
+        ):
+            raise RuntimeError(f"bracket 未确认被接受（超时）: {statuses}")
 
     # ---- 下单（M4：市价 + 模式A 成交后精确挂 OCA）----------------------
 
@@ -458,6 +510,10 @@ class BrokerManager:
             # 超时未达终态：入场单状态未知（可能已成交）。绝不静默当作未成交，
             # 否则真成交了却不挂保护单 = 裸仓。大声抛错让用户去查持仓/挂单。
             if not done:
+                # best-effort 撤掉状态未知的入场单（IOC 理论不 resting，这是 gateway
+                # 挂死的兜底）：消掉"稍后才成交→裸仓"的尾部风险，再大声抛错。
+                with contextlib.suppress(Exception):
+                    ib.cancelOrder(entry)
                 raise EntryUncertain(entry_trade.orderStatus.status)
 
             filled = int(entry_trade.orderStatus.filled or 0)
@@ -472,12 +528,20 @@ class BrokerManager:
 
             # 有成交但成交价无效（NaN/<=0）：有仓位却无法算保护单 → 立即平仓。
             if not math.isfinite(avg) or avg <= 0:
-                self._flatten_or_alert(
-                    contract, side, filled, Decimal("0"), f"成交价无效（{avg}），无法计算保护单"
+                await self._flatten_or_alert(
+                    ib, contract, side, filled, Decimal("0"), f"成交价无效（{avg}），无法计算保护单"
                 )
 
             fill_price = Decimal(str(avg))
-            bracket = compute_bracket(fill_price, filled, take_profit, stop_loss, side=side)
+            try:
+                bracket = compute_bracket(fill_price, filled, take_profit, stop_loss, side=side)
+            except ValueError as exc:
+                # 【P0·审计 2026-06-10】入场已成交后保护价算不出（如 PROFIT_USD 在 IOC
+                # 部分成交下每股距离 = value/filled 被放大到超过股价）→ 必须立即平仓。
+                # 绝不能让异常裸冒泡变成"已拒单"响应而实际持仓裸奔（红线 #3）。
+                await self._flatten_or_alert(
+                    ib, contract, side, filled, fill_price, f"保护价计算失败: {exc}"
+                )
 
             prot_trades: list[Any] = []
             try:
@@ -487,8 +551,8 @@ class BrokerManager:
                 await self._verify_protection_live(prot_trades, timeout=self._protect_timeout_s)
             except Exception as exc:  # noqa: BLE001 — 任何保护单失败都必须平仓
                 # 先撤掉任何已挂出的保护单（避免遗留单腿在平仓后反向开新裸仓），再平仓。
-                self._cancel_trades(prot_trades)
-                self._flatten_or_alert(contract, side, filled, fill_price, str(exc))
+                self._cancel_trades(ib, prot_trades)
+                await self._flatten_or_alert(ib, contract, side, filled, fill_price, str(exc))
 
             return {
                 "filled": filled,
@@ -512,13 +576,15 @@ class BrokerManager:
             await asyncio.sleep(interval)
         return bool(trade.isDone())
 
-    def _cancel_trades(self, trades: list[Any]) -> None:
-        """尽力撤掉给定 trade 的订单（用于保护单失败时清理遗留单腿）。"""
-        if self._ib is None:
-            return
+    def _cancel_trades(self, ib: Any, trades: list[Any]) -> None:
+        """尽力撤掉给定 trade 的订单（用于保护单失败时清理遗留单腿）。
+
+        用**下单时捕获的局部 ib 引用**而非 ``self._ib``：即使连接管理出现意外置换，
+        撤单也必须打到挂单的那条连接上。
+        """
         for t in trades:
             with contextlib.suppress(Exception):
-                self._ib.cancelOrder(t.order)
+                ib.cancelOrder(t.order)
 
     def _place_oca_protection(
         self,
@@ -600,30 +666,45 @@ class BrokerManager:
             return {"cancelled": True}
 
     async def flatten_all(self) -> dict[str, Any]:
-        """市价全平：先撤所有挂单（含保护单，避免平仓后保护单又开新仓），再市价平掉每个持仓。"""
+        """市价全平：先撤所有挂单（含保护单，避免平仓后保护单又开新仓），再市价平掉每个持仓。
+
+        每个平仓单等待终态并回报实际成交量（IOC 可能被整单撤掉）——绝不默认"已平"。
+        """
         if not self.is_connected() or self._ib is None or self._adapter is None:
             raise RuntimeError("未连接 Gateway")
         ib = self._ib
         async with self._order_lock:
             self._adapter.cancel_all(None)
             await asyncio.sleep(0.3)
+            # 对账：positions() 是 positionEvent 缓存，刚成交的仓位可能滞后。
+            # 救命按钮必须先向 IB 强制拉一次最新持仓（best-effort，失败仍按缓存平）。
+            with contextlib.suppress(Exception):
+                await ib.reqPositionsAsync()
             closed: list[dict[str, Any]] = []
-            # 撤单传播后重读一次持仓，尽量用最新数量（降低 stale 数量风险）。
             for pos in self._adapter.list_positions():
                 close_action = "SELL" if pos.side is Side.LONG else "BUY"
                 contract = Stock(pos.symbol, "SMART", "USD")
                 await ib.qualifyContractsAsync(contract)
                 order = MarketOrder(close_action, pos.quantity)
                 order.tif = "IOC"
-                ib.placeOrder(contract, order)
+                trade = ib.placeOrder(contract, order)
+                await self._wait_done(trade, timeout=self._fill_timeout_s)
+                flat_filled = int(trade.orderStatus.filled or 0)
                 closed.append(
-                    {"symbol": pos.symbol, "action": close_action, "quantity": pos.quantity}
+                    {
+                        "symbol": pos.symbol,
+                        "action": close_action,
+                        "quantity": pos.quantity,
+                        "filled": flat_filled,
+                        "failed": flat_filled < pos.quantity,
+                    }
                 )
             log.warning("flatten_all: 平掉 %d 个持仓", len(closed))
             return {"flattened": closed}
 
-    def _flatten_or_alert(
+    async def _flatten_or_alert(
         self,
+        ib: Any,
         contract: Any,
         side: Side,
         filled: int,
@@ -633,7 +714,7 @@ class BrokerManager:
         """平仓并抛 ProtectionFailed。若**平仓下单本身失败**（断连等）= 裸仓未平，
         抛带 ``flatten.failed=True`` 的告警，让前端给出最强"立即手动平仓"提示。"""
         try:
-            flatten = self._emergency_flatten(contract, side, filled)
+            flatten = await self._emergency_flatten(ib, contract, side, filled)
         except Exception as flat_exc:  # noqa: BLE001 — 平仓失败本身要醒目上报
             log.critical("EMERGENCY FLATTEN FAILED → 可能裸仓: %s", flat_exc)
             raise ProtectionFailed(
@@ -650,7 +731,9 @@ class BrokerManager:
             filled=filled, fill_price=fill_price, reason=reason, flatten=flatten
         )
 
-    def _emergency_flatten(self, contract: Any, side: Side, quantity: int) -> dict[str, Any]:
+    async def _emergency_flatten(
+        self, ib: Any, contract: Any, side: Side, quantity: int
+    ) -> dict[str, Any]:
         """红线 #3：市价平掉刚成交的仓位，不留裸仓。直接按已确认成交量 ``quantity`` 平。
 
         为什么直接平 ``quantity`` 而**不**读 ``get_position`` 对账：能走到这里，上游
@@ -658,16 +741,32 @@ class BrokerManager:
         故两条调用路径（成交价无效 / 保护单挂失败且无腿成交）下持仓**必为满额 quantity**。
         而 ``ib.positions()`` 缓存由 positionEvent 推送，与成交事件是两条独立流、刚成交那几百
         毫秒常滞后——此刻信任缓存裸 0 会**漏平真实持仓 = 裸仓**（比直接平更危险）。
+
+        平仓单等待终态并校验成交量：IOC 在停牌/LULD/流动性枯竭时会被整单撤掉，
+        谎报"已平仓"比平仓失败更危险 → 未全平时返回 ``failed=True`` 强告警。
         """
-        assert self._ib is not None
         close_action = "SELL" if side is Side.LONG else "BUY"
         flat = MarketOrder(close_action, quantity)
         flat.tif = "IOC"
-        self._ib.placeOrder(contract, flat)
+        trade = ib.placeOrder(contract, flat)
         log.error(
             "PROTECTION FAILED → 紧急平仓 %s %s x%s", contract.symbol, close_action, quantity
         )
-        return {"flatten_order_id": flat.orderId, "action": close_action, "quantity": quantity}
+        await self._wait_done(trade, timeout=self._fill_timeout_s)
+        flat_filled = int(trade.orderStatus.filled or 0)
+        result: dict[str, Any] = {
+            "flatten_order_id": flat.orderId,
+            "action": close_action,
+            "quantity": quantity,
+            "filled": flat_filled,
+        }
+        if flat_filled < quantity:
+            result["failed"] = True
+            result["note"] = (
+                f"紧急平仓单仅成交 {flat_filled}/{quantity}（IOC 可能被撤），"
+                "剩余仓位未平，请立即手动平仓！"
+            )
+        return result
 
 
 __all__ = [

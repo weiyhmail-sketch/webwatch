@@ -31,6 +31,8 @@ risk:
   # 单笔 notional 上限（下单前风控会拒超限单；paper/live 通用）。
   # 设为 20000 以让下方 live 首周上限($20000)真正成为绑定约束。
   max_order_notional_usd: 20000
+  # 单笔绝对股数上限（第二道闸）：仙股下 notional 上限拦不住超大手数。
+  max_order_shares: 100000
   # 单笔最大亏损 ≤ 此比例 × NAV（镜像 scalper 0.5%）。超限拒单。
   max_position_risk_pct: 0.005
   # 净值低于此值时受 PDT 限制（仅提示，不拒单）。
