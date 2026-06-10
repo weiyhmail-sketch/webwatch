@@ -23,6 +23,7 @@ class FakeBroker:
         self,
         *,
         protection_fails: bool = False,
+        limit_protection_fails: bool = False,
         nav: Decimal | None = Decimal("1000000"),
         buying_power: Decimal | None = Decimal("4000000"),
         live: bool = False,
@@ -33,6 +34,7 @@ class FakeBroker:
         self.placed: list[dict[str, Any]] = []
         self.market_orders: list[dict[str, Any]] = []
         self.protection_fails = protection_fails
+        self.limit_protection_fails = limit_protection_fails
         self.nav = nav
         self.buying_power = buying_power
         self.cancelled = False
@@ -95,6 +97,15 @@ class FakeBroker:
         outside_rth: bool = False,
         stop_limit_offset_pct: Decimal | None = None,
     ) -> dict[str, Any]:
+        if self.limit_protection_fails:
+            # 模式B：母单成交但保护腿被拒 → broker 已紧急平仓并抛 ProtectionFailed
+            raise ProtectionFailed(
+                filled=quantity,
+                fill_price=entry_limit,
+                reason="bracket 保护腿异常",
+                flatten={"flatten_order_id": 9, "action": "SELL", "quantity": quantity,
+                         "filled": quantity},
+            )
         rec = {
             "symbol": symbol,
             "side": side.value,
@@ -446,6 +457,75 @@ def test_closed_session_rejects_market(monkeypatch: Any) -> None:
         r = c.post("/api/order/market", json=_market_body())
         assert r.status_code == 400
         assert len(fake.placed) == 0 and len(fake.market_orders) == 0
+
+
+def test_limit_order_protection_failed_surfaced() -> None:
+    # 模式B 母单成交但保护腿被拒 → app 必须透传 protection_failed（而非笼统"下单失败"）
+    fake = FakeBroker(limit_protection_fails=True)
+    with TestClient(create_app(fake, auto_connect=False)) as c:
+        r = c.post("/api/order/limit", json=_order_body())
+        body = r.json()
+        assert body["protection_failed"] is True
+        assert body["flatten"]["action"] == "SELL"
+
+
+class TestLocalOnlyGuard:
+    """Web 安全：API/WS 仅接受本机来源（防 drive-by 下单 / LAN 直连 / WS 跨站读取）。"""
+
+    def test_cross_origin_post_rejected(self) -> None:
+        fake = FakeBroker()
+        with TestClient(create_app(fake, auto_connect=False)) as c:
+            r = c.post("/api/order/limit", json=_order_body(),
+                       headers={"origin": "http://evil.example"})
+            assert r.status_code == 403
+            assert len(fake.placed) == 0  # 绝不触达下单
+
+    def test_null_origin_rejected(self) -> None:
+        fake = FakeBroker()
+        with TestClient(create_app(fake, auto_connect=False)) as c:
+            r = c.post("/api/flatten_all", headers={"origin": "null"})
+            assert r.status_code == 403
+            assert fake.flattened is False
+
+    def test_local_origin_allowed(self) -> None:
+        with _client() as c:
+            r = c.post("/api/order/preview", json=_order_body(),
+                       headers={"origin": "http://127.0.0.1:8000"})
+            assert r.status_code == 200
+
+    def test_localhost_origin_allowed(self) -> None:
+        with _client() as c:
+            r = c.post("/api/order/preview", json=_order_body(),
+                       headers={"origin": "http://localhost:8000"})
+            assert r.status_code == 200
+
+    def test_lan_host_rejected_even_for_get(self) -> None:
+        # 误用 --host 0.0.0.0 起服务时，经 LAN IP 访问的请求 Host 非本机 → 仍 403
+        fake = FakeBroker()
+        with TestClient(create_app(fake, auto_connect=False)) as c:
+            r = c.get("/api/state", headers={"host": "192.168.1.5:8000"})
+            assert r.status_code == 403
+
+    def test_no_origin_local_tools_allowed(self) -> None:
+        # curl/本地脚本不带 Origin → 放行（浏览器跨站请求必带 Origin）
+        with _client() as c:
+            assert c.get("/api/state").status_code == 200
+
+    def test_ws_cross_origin_rejected(self) -> None:
+        with _client() as c:
+            try:
+                with c.websocket_connect("/ws", headers={"origin": "http://evil.example"}) as ws:
+                    ws.receive_json()
+                raised = False
+            except Exception:  # noqa: BLE001 — 连接被拒的具体异常类型随 starlette 版本变化
+                raised = True
+            assert raised, "跨站 Origin 的 WS 连接必须被拒绝"
+
+    def test_ws_local_origin_allowed(self) -> None:
+        with _client() as c, c.websocket_connect(
+            "/ws", headers={"origin": "http://127.0.0.1:8000"}
+        ) as ws:
+            assert ws.receive_json()["environment"] == "paper"
 
 
 def test_trades_endpoint() -> None:

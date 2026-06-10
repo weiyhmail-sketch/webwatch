@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
@@ -39,6 +40,30 @@ log = logging.getLogger(__name__)
 
 _WEB_DIR = Path(__file__).resolve().parent / "web"
 BROADCAST_INTERVAL_S = 0.3  # 报价/状态推送间隔（秒）
+
+# 本机面板硬边界：API/WS 只接受本机来源。
+# - Origin 由浏览器强制设置、页面脚本不可伪造 → 拦掉恶意网页跨站下单（drive-by CSRF）；
+#   浏览器对 WebSocket 不施加同源策略，/ws 不校验 Origin = 任意网页可读账户推送。
+# - Host 拦掉局域网直连与 DNS rebinding：即使有人误用 --host 0.0.0.0 起服务，
+#   经 LAN IP 访问的请求 Host 不在白名单，仍 403。
+# "testserver" 是 FastAPI TestClient 的默认 Host（攻击者无法令浏览器发出该 Host）。
+_LOCAL_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1", "testserver"})
+
+
+def _local_host(value: str | None, *, allow_missing: bool = True) -> bool:
+    """``Origin``（URL）或 ``Host``（host[:port]）头是否指向本机。
+
+    缺失时按 ``allow_missing`` 放行：curl/本地脚本不带 Origin，而浏览器跨站请求必带。
+    """
+    if not value:
+        return allow_missing
+    if value == "null":  # 沙箱 iframe / file:// 页面 —— 一律拒
+        return False
+    try:
+        host = urlsplit(value if "//" in value else f"//{value}").hostname
+    except ValueError:
+        return False
+    return host in _LOCAL_HOSTNAMES
 
 
 class WatchRequest(BaseModel):
@@ -141,6 +166,20 @@ def _risk_for(
             )
         findings = [extra, *findings]
     return findings
+
+
+def _protection_failed_response(exc: ProtectionFailed) -> JSONResponse:
+    """红线 #3：已成交但保护单失败、已紧急平仓 —— 统一醒目回报（市价/限价 bracket 通用）。"""
+    return JSONResponse(
+        {
+            "rejected": False,
+            "protection_failed": True,
+            "reason": exc.reason,
+            "filled": exc.filled,
+            "fill_price": str(exc.fill_price),
+            "flatten": exc.flatten,
+        }
+    )
 
 
 def _closed_response() -> JSONResponse | None:
@@ -257,6 +296,20 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
 
     app = FastAPI(title="WebWatch 下单面板", lifespan=lifespan)
 
+    @app.middleware("http")
+    async def _local_only_guard(request: Request, call_next: Any) -> Any:
+        """API 全量 + 一切写方法只接受本机来源（见 _LOCAL_HOSTNAMES 注释）。"""
+        guarded = request.url.path.startswith("/api") or request.method not in ("GET", "HEAD")
+        if guarded and (
+            not _local_host(request.headers.get("host"))
+            or not _local_host(request.headers.get("origin"))
+        ):
+            return JSONResponse(
+                {"rejected": True, "reason": "非本机来源请求已拒绝（面板仅限本机使用）"},
+                status_code=403,
+            )
+        return await call_next(request)
+
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(_WEB_DIR / "index.html")
@@ -346,6 +399,9 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
                 outside_rth=outside,
                 stop_limit_offset_pct=panel.stop_limit_offset_pct,
             )
+        except ProtectionFailed as exc:
+            # 模式B 验证：母单已成交但保护腿被拒 → 已紧急平仓，醒目回报
+            return _protection_failed_response(exc)
         except Exception as exc:  # noqa: BLE001 — 下单失败回报给前端，不崩
             return JSONResponse(
                 {"rejected": True, "reason": f"下单失败: {exc}"}, status_code=502
@@ -431,6 +487,8 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
                     outside_rth=True,
                     stop_limit_offset_pct=panel.stop_limit_offset_pct,
                 )
+            except ProtectionFailed as exc:
+                return _protection_failed_response(exc)
             except Exception as exc:  # noqa: BLE001
                 return JSONResponse(
                     {"rejected": True, "reason": f"下单失败: {exc}"}, status_code=502
@@ -456,16 +514,7 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
             )
         except ProtectionFailed as exc:
             # 红线：已成交但保护单失败，已紧急平仓 —— 醒目告知用户
-            return JSONResponse(
-                {
-                    "rejected": False,
-                    "protection_failed": True,
-                    "reason": exc.reason,
-                    "filled": exc.filled,
-                    "fill_price": str(exc.fill_price),
-                    "flatten": exc.flatten,
-                }
-            )
+            return _protection_failed_response(exc)
         except EntryUncertain as exc:
             # 入场超时、状态未知（可能已成交）。绝不当作"已拒绝"，醒目提示查持仓。
             return JSONResponse(
@@ -508,6 +557,11 @@ def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:
+        # 浏览器对 WebSocket 不施加同源策略：任意网页都能发起连接。
+        # 不校验 Origin = 恶意页面可持续读取净值/持仓/挂单推送。
+        if not _local_host(websocket.headers.get("origin")):
+            await websocket.close(code=1008)  # policy violation
+            return
         manager: ConnectionManager = websocket.app.state.ws_manager
         broker_: BrokerLike = websocket.app.state.broker
         await manager.connect(websocket)

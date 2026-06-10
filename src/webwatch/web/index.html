@@ -227,6 +227,10 @@ const fmt = (v, d=2) => (v === null || v === undefined) ? '—' : Number(v).toFi
 const money = (v) => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
 // 红涨绿跌：>=0 用 up(红)，<0 用 down(绿)
 const chgCls = (v) => (v === null || v === undefined) ? 'mut' : (v >= 0 ? 'up' : 'down');
+// HTML 转义：所有插入 innerHTML 的后端字符串（symbol/order_type/status/reason 等，
+// 部分来自 IBKR 数据流）一律经此转义——第三方数据流不可信，防 XSS。
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function render(st) {
   lastState = st;
@@ -254,7 +258,7 @@ function render(st) {
     <span>今日盈亏 <b class="${chgCls(pnl.daily)}">${pnl.daily==null?'—':money(pnl.daily)}</b></span>
     <span class="mut" style="font-size:12px;">已实现 ${pnl.realized==null?'—':money(pnl.realized)} · 浮动 ${pnl.unrealized==null?'—':money(pnl.unrealized)}</span>` : '';
   $('acct').innerHTML = a ? `
-    <span>账户 <b>${a.account}</b></span>
+    <span>账户 <b>${esc(a.account)}</b></span>
     <span>净值 <b>${money(a.net_liquidation)}</b></span>
     <span>现金 <b>${money(a.total_cash_value)}</b></span>
     <span>购买力 <b>${money(a.buying_power)}</b></span>${pnlHtml}` : '<span class="mut">账户数据不可用</span>';
@@ -267,20 +271,20 @@ function render(st) {
     const chg = (r.last != null && r.close) ? (r.last - r.close) : null;
     const pct = (chg != null && r.close) ? (chg / r.close * 100) : null;
     const cls = chgCls(chg);
-    const tag = r.data_type ? `<span class="mut" style="font-size:10px"> ${r.data_type}</span>` : '';
+    const tag = r.data_type ? `<span class="mut" style="font-size:10px"> ${esc(r.data_type)}</span>` : '';
     const selCls = r.symbol === selectedSymbol ? ' sel' : '';
-    return `<tr class="q${selCls}" data-sym="${r.symbol}">
-      <td>${r.symbol}${tag}</td><td class="${cls}">${fmt(r.last)}</td>
+    return `<tr class="q${selCls}" data-sym="${esc(r.symbol)}">
+      <td>${esc(r.symbol)}${tag}</td><td class="${cls}">${fmt(r.last)}</td>
       <td class="${cls}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td>
       <td>${fmt(r.bid)}</td><td>${fmt(r.ask)}</td>
-      <td class="x" data-x="${r.symbol}">✕</td></tr>`;
+      <td class="x" data-x="${esc(r.symbol)}">✕</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">还没有关注的标的</td></tr>';
 
   // 持仓
   const p = $('positions');
   p.innerHTML = (st.positions && st.positions.length) ? st.positions.map(r => {
     const pnl = r.unrealized_pnl;
-    return `<tr><td>${r.symbol}</td><td>${r.side==='long'?'多':'空'}</td>
+    return `<tr><td>${esc(r.symbol)}</td><td>${r.side==='long'?'多':'空'}</td>
     <td>${r.quantity}</td><td>${fmt(r.avg_entry_price)}</td><td>${fmt(r.mark_price)}</td>
     <td class="${chgCls(pnl)}">${pnl==null?'—':money(pnl)}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">无持仓</td></tr>';
@@ -288,9 +292,9 @@ function render(st) {
   // 挂单
   const o = $('orders');
   o.innerHTML = (st.orders && st.orders.length) ? st.orders.map(r => `
-    <tr><td>${r.symbol}</td><td>${r.side==='long'?'多':'空'}</td><td>${r.order_type}</td>
+    <tr><td>${esc(r.symbol)}</td><td>${r.side==='long'?'多':'空'}</td><td>${esc(r.order_type)}</td>
     <td>${r.quantity}</td><td>${fmt(r.limit_price)}</td><td>${fmt(r.stop_price)}</td>
-    <td>${r.status}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">无挂单</td></tr>';
+    <td>${esc(r.status)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">无挂单</td></tr>';
 }
 
 // 今日订单/成交记录（按需从 /api/trades 拉，含已完成订单）
@@ -300,9 +304,9 @@ function renderTrades(list) {
     const tm = r.time ? new Date(r.time).toLocaleTimeString('zh-CN',{hour12:false}) : '—';
     const sideZh = r.side === 'BUY' ? '买' : '卖';
     const stCls = r.status === 'Filled' ? 'up' : ((r.status==='Cancelled'||r.status==='Inactive'||r.status==='ApiCancelled') ? 'mut' : '');
-    return `<tr><td>${tm}</td><td>${r.symbol}</td><td class="${r.side==='BUY'?'up':'down'}">${sideZh}</td><td>${r.order_type}</td>
+    return `<tr><td>${tm}</td><td>${esc(r.symbol)}</td><td class="${r.side==='BUY'?'up':'down'}">${sideZh}</td><td>${esc(r.order_type)}</td>
       <td>${r.quantity}</td><td>${r.filled}</td><td>${fmt(r.avg_fill_price)}</td>
-      <td class="${stCls}">${r.status}</td></tr>`;
+      <td class="${stCls}">${esc(r.status)}</td></tr>`;
   }).join('') : '<tr><td colspan="8" class="empty">今日暂无订单</td></tr>';
 }
 async function fetchTrades() {
@@ -315,12 +319,12 @@ function renderBigQuote(st) {
   const el = $('bigq');
   if (!selectedSymbol) { el.innerHTML = '<div class="ph">← 点右侧报价选择标的，或在下方输入代码</div>'; return; }
   const r = (st.quotes || []).find(x => x.symbol === selectedSymbol);
-  if (!r) { el.innerHTML = `<div class="sym">${selectedSymbol}</div><div class="ph">未在自选中 / 暂无行情，点右侧「添加」</div>`; return; }
+  if (!r) { el.innerHTML = `<div class="sym">${esc(selectedSymbol)}</div><div class="ph">未在自选中 / 暂无行情，点右侧「添加」</div>`; return; }
   const chg = (r.last != null && r.close) ? (r.last - r.close) : null;
   const pct = (chg != null && r.close) ? (chg / r.close * 100) : null;
   const cls = chgCls(chg);
   el.innerHTML = `
-    <div class="sym">${r.symbol} <span class="mut" style="font-size:11px">${r.data_type||''}</span></div>
+    <div class="sym">${esc(r.symbol)} <span class="mut" style="font-size:11px">${esc(r.data_type||'')}</span></div>
     <div class="last ${cls}">${fmt(r.last)}</div>
     <div class="chg ${cls}">${chg==null?'—':((chg>=0?'+':'')+chg.toFixed(2)+'  '+(pct>=0?'+':'')+pct.toFixed(2)+'%')}</div>
     <div class="ba"><span>买一 <b>${fmt(r.bid)}</b></span><span>卖一 <b>${fmt(r.ask)}</b></span><span>昨收 <b>${fmt(r.close)}</b></span></div>`;
@@ -412,13 +416,22 @@ async function post(path, body) {
 function riskHtml(res) {
   if (!res.risk || !res.risk.length) return '';
   const w = res.risk.filter(f => f.severity === 'warn');
-  return w.length ? `<div class="err">⚠ ${w.map(f => f.message).join('；')}</div>` : '';
+  return w.length ? `<div class="err">⚠ ${w.map(f => esc(f.message)).join('；')}</div>` : '';
+}
+// 保护单失败（红线 #3，模式A/模式B 通用）：醒目展示紧急平仓结果
+function protectionFailedHtml(res) {
+  const f = res.flatten || {};
+  const flatMsg = f.failed ? `<b>⚠ 紧急平仓未完成（成交 ${f.filled ?? 0}/${f.quantity ?? '?'}），可能裸仓——立即手动平仓！</b>`
+    : (f.flatten_order_id && f.quantity > 0) ? `已紧急平仓 ${f.quantity} 股（单号 ${f.flatten_order_id}）`
+    : `<b>未能确认平仓，请立即手动检查持仓！</b>`;
+  return `<span class="down">⚠ 保护单失败！</span> 成交 ${res.filled} 股 @ ${esc(res.fill_price)} — ${flatMsg}。原因：${esc(res.reason)}`;
 }
 function showOrderResult(res, placed) {
   const el = $('orderResult');
-  if (res.rejected) { el.innerHTML = `<span class="down">✕ 拒绝：${res.reason}</span>`; return; }
+  if (res.protection_failed) { el.innerHTML = protectionFailedHtml(res); return; }
+  if (res.rejected) { el.innerHTML = `<span class="down">✕ 拒绝：${esc(res.reason)}</span>`; return; }
   const p = res.plan;
-  const warn = ((p.warnings && p.warnings.length) ? `<div class="err">⚠ ${p.warnings.join('；')}</div>` : '') + riskHtml(res);
+  const warn = ((p.warnings && p.warnings.length) ? `<div class="err">⚠ ${p.warnings.map(esc).join('；')}</div>` : '') + riskHtml(res);
   const head = placed
     ? `<span class="up">✓ 已下单</span> <span class="mut">(单号 ${res.placement.parent_id}/${res.placement.take_profit_id}/${res.placement.stop_loss_id})</span>`
     : '<span class="mut">预览</span>';
@@ -439,16 +452,9 @@ async function buyLimit() {
 }
 function showMarketResult(res) {
   const el = $('orderResult');
-  if (res.protection_failed) {
-    const f = res.flatten || {};
-    const flatMsg = f.failed ? `<b>⚠ 紧急平仓也失败，可能裸仓——立即手动平仓！</b>`
-      : (f.flatten_order_id && f.quantity > 0) ? `已紧急平仓 ${f.quantity} 股（单号 ${f.flatten_order_id}）`
-      : `<b>未能确认平仓，请立即手动检查持仓！</b>`;
-    el.innerHTML = `<span class="down">⚠ 保护单失败！</span> 成交 ${res.filled} 股 @ ${res.fill_price} — ${flatMsg}。原因：${res.reason}`;
-    return;
-  }
-  if (res.entry_uncertain) { el.innerHTML = `<span class="down">⚠ 入场单状态未知（可能已成交）！请立即检查持仓与挂单。</span> ${res.reason}`; return; }
-  if (res.rejected) { el.innerHTML = `<span class="down">✕ 拒绝：${res.reason}</span>`; return; }
+  if (res.protection_failed) { el.innerHTML = protectionFailedHtml(res); return; }
+  if (res.entry_uncertain) { el.innerHTML = `<span class="down">⚠ 入场单状态未知（可能已成交）！请立即检查持仓与挂单。</span> ${esc(res.reason)}`; return; }
+  if (res.rejected) { el.innerHTML = `<span class="down">✕ 拒绝：${esc(res.reason)}</span>`; return; }
   const pl = res.placement;
   if (!pl) { el.innerHTML = `<span class="down">✕ 异常响应，请检查持仓</span>`; return; }
   if (res.converted_to_limit) {
@@ -457,7 +463,7 @@ function showMarketResult(res) {
       <span class="mut">outsideRth · 单号 ${pl.parent_id}/${pl.take_profit_id}/${pl.stop_loss_id}</span>${riskHtml(res)}`;
     return;
   }
-  if (pl.filled === 0) { el.innerHTML = `<span class="mut">市价单未成交（${pl.message||''}）</span>`; return; }
+  if (pl.filled === 0) { el.innerHTML = `<span class="mut">市价单未成交（${esc(pl.message||'')}）</span>`; return; }
   el.innerHTML = `<span class="up">✓ 市价成交</span> ${pl.filled} 股 @ <b>${pl.fill_price}</b> —
     止盈 <b class="up">${pl.take_profit}</b> / 止损 <b class="down">${pl.stop_loss}</b> <span class="mut">(OCA ${pl.oca_group})</span>${riskHtml(res)}`;
 }
