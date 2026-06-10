@@ -15,3 +15,6 @@ build/
 
 # os
 .DS_Store
+
+# 测试产物
+.coverage*

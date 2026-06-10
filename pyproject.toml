@@ -45,10 +45,20 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# T20 = 禁 print（红线）；DTZ = 禁 naive datetime（UTC 存 ET 展示）；
+# BLE = 裸 except Exception 必须显式 noqa 说明理由（钱链路宽捕获要可审计）。
+select = ["E", "F", "I", "UP", "B", "SIM", "T20", "DTZ", "BLE"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["T20"]  # 脚本允许 print（CLAUDE.md 红线例外）
+"tests/*" = ["BLE"]    # 测试里宽捕获用于断言异常路径，不强制注释
 
 [tool.mypy]
 strict = true
 python_version = "3.11"
+
+# 仅对无 stub 的第三方包关 import 检查；全局关掉会让拼错的 import 静默变 Any。
+[[tool.mypy.overrides]]
+module = ["ib_async.*", "scalper.*", "pandas.*"]
 ignore_missing_imports = true

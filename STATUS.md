@@ -4,7 +4,8 @@
 > 协作约定见 [CLAUDE.md](CLAUDE.md)，完整方案见 plan 文件
 > `~/.claude/plans/ibkr-api-jaunty-sprout.md`。
 
-最后更新：**2026-06-10**（M0–M8 完成；做空下单已开放、脏代码标的已修；145 单测全绿）
+最后更新：**2026-06-10**（全项目审计 → P0/P1 全修：裸仓 P0、Web 安全 3×P0、模式B验证、
+平仓成交验证、SHORT 保证金、tick 边界；182 单测全绿）
 
 ---
 
@@ -30,6 +31,42 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 | M7 | 切 live 闸门（二重互锁 + 醒目标识 + 首周上限 + 每笔确认）| ✅ 代码完成，106 单测；实际切 live 待 M6 通过 + 用户批准 |
 
 ---
+
+## 全项目审计 + 修复（2026-06-10，本轮）
+
+3 个审计代理（钱链路/Web 安全/工程质量）全面审计后按 TDD 修复全部 P0/P1 + 主要 P2：
+
+**P0（已修，均有回归测试）**：
+- **裸仓 P0**：`place_market_with_protection` 中按真实成交价重算的 `compute_bracket` 在
+  flatten 保护 try 块**之外**——PROFIT_USD 目标 + IOC 部分成交时每股距离 = value/filled
+  被放大 → ValueError 裸冒泡 → 前端显示"已拒单"**实际裸仓**。已移入保护（失败→紧急平仓）。
+- **Web 安全 3×P0**：下单端点零认证零 CORS 防护（drive-by CSRF 下单）、`/ws` 不校验 Origin
+  （任意网页可读账户推送）、LAN 直连。已加 `_local_only_guard` middleware：API 全量 + 写方法
+  校验 Origin/Host 在本机白名单（127.0.0.1/localhost/::1），WS accept 前校验 Origin；
+  即使误用 `--host 0.0.0.0`，经 LAN IP 访问 Host 非本机仍 403。
+
+**P1（已修）**：
+- **模式B 挂出后验证**（`_verify_bracket_accepted`）：子单被拒→撤三腿；母单已成交→紧急平仓
+  （app 限价/转限价路径透传 `protection_failed`，前端醒目展示）。
+- **紧急平仓/全平验证成交**：`_emergency_flatten`/`flatten_all` 等终态并校验 filled，
+  IOC 被撤（停牌/LULD）→ `failed=True`"仅成交 x/y 立即手动平仓"，不再谎报已平。
+  `flatten_all` 平仓前先 `reqPositionsAsync` 对账（缓存滞后漏平）。
+- **前端 XSS**：`esc()` 转义所有 innerHTML 后端字段（symbol/order_type/status/reason 来自
+  IBKR 数据流不可信）。
+- **SHORT 保证金**：risk 空头购买力按 max(entry, $2.50)/股 近似（低价股按多头 notional 会
+  **低估**漏拦）+ 常驻 WARN（近似估算/未查可借券）。
+
+**P2/防御（已修）**：跨 $1 tick 边界按腿价自身价位取整（entry<$1 而保护价≥$1 的亚分价 IB 必拒）；
+模式B RTH 保护腿也 GTC（收盘过期隔夜裸仓）；connect/disconnect 进 `_order_lock`（下单中重连
+换连接）；`_cancel_trades`/`_emergency_flatten` 用下单时局部 ib 引用；EntryUncertain 抛错前
+best-effort 撤入场单；risk 负数量 BLOCK；单笔绝对股数上限 `max_order_shares`(10万股，仙股第二道闸)；
+错误文本账户号脱敏 `_redact`。
+
+**测试缺口补齐**：SHORT 模式A 全链路（SELL 入场/BUY 保护/BUY 紧急平仓）、SHORT off-tick 取整
+方向、保护腿 PendingSubmit 超时、部分成交按 filled 挂保护。**145 → 182 单测全绿**。
+
+**工程固化**：ruff 加 `T20`(禁 print)/`DTZ`(禁 naive datetime)/`BLE`(裸捕获须 noqa 注明)；
+mypy 改按模块 override（不再全局 ignore_missing_imports）；`.coverage` 移出 git。
 
 ## 做空下单 + 脏代码标的修复（2026-06-10）
 
@@ -114,9 +151,11 @@ StopLimitOrder 字段逐一相同**、IBKR 能正确识别 → 非 bug。已修�
   （完整"紧急路径抢占入场锁"留作后续；当前 IOC 亚秒、影响小）。
 - [x] **3. 裸仓显式告警**：紧急平仓下单本身失败 → `_flatten_or_alert` 抛 `flatten.failed=True`，
   前端显示"⚠ 可能裸仓，立即手动平仓"。
-- [ ] 4. 真实做空保证金（risk 空头购买力当前按 entry×qty 估）——**UI 当前只做多(买入)，低优先**。
-- [ ] 5. `_cancel_trades`→`_emergency_flatten` 窄竞态：平后对账兜（极窄窗口，留 live 前）。
-- [ ] 6. EntryUncertain 路径自动对账平仓（当前靠用户手动查，已醒目提示）。
+- [x] **4. 做空保证金近似**（2026-06-10 审计修复）：空头购买力按 max(entry, $2.50)/股 估
+  + 常驻 WARN（近似/未查可借券 HTB）。完整 IB 分档规则与 shortability 查询留切 live 前评估。
+- [x] **5. 紧急平仓对账**（2026-06-10 审计修复）：`_emergency_flatten`/`flatten_all` 等终态
+  并校验 filled，未平→`failed=True` 强告警；`flatten_all` 先 `reqPositionsAsync` 对账。
+- [ ] 6. EntryUncertain 路径自动对账平仓（已加 best-effort 撤入场单；完整对账靠用户手动查，已醒目提示）。
 - [x] **M7 红线 #1 live 切换**（已实现）：
   - 进 live 二重互锁：`WEBWATCH_ENV=live` **且** `WEBWATCH_LIVE_CONFIRM=YES`，缺一回退 paper（已实测）。
   - live 醒目标识：顶部红色脉冲横幅 + env 徽章红；互锁回退时琥珀色警告条。
