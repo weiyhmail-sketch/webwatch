@@ -99,6 +99,34 @@
   .empty{color:var(--muted);padding:10px;text-align:left;}
   .qrow input{width:120px;} .qrow{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
   .qrow .add{background:var(--accent);color:#fff;padding:8px 14px;}
+  /* —— 异动雷达 —— */
+  .viewtabs{display:flex;gap:8px;margin-bottom:14px;}
+  .viewtabs button{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+        padding:8px 24px;border-radius:8px;font-weight:700;font-size:13px;}
+  .viewtabs button.act{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .radarbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px;
+        color:var(--muted);font-size:12px;}
+  .radarbar .warnbox{color:#1a1a1a;background:var(--amber);padding:3px 10px;border-radius:6px;font-weight:700;}
+  #muteBtn{font-size:15px;background:transparent;border:1px solid var(--line);border-radius:8px;padding:3px 10px;}
+  #muteBtn:hover{border-color:var(--accent);}
+  .radarfilters{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px;
+        font-size:12px;color:var(--muted);}
+  .radarfilters input[type=number]{width:72px;padding:5px 8px;font-size:12px;}
+  .boards{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:1280px){.boards{grid-template-columns:1fr;}}
+  .board h3{margin:0 0 6px;font-size:12px;letter-spacing:1px;}
+  .board h3.u{color:var(--up);} .board h3.d{color:var(--down);}
+  .board td,.board th{padding:6px 5px;font-size:12.5px;}
+  tr.flash td{animation:flashbg 1.5s ease-out;}
+  @keyframes flashbg{from{background:#4a3a14;}to{background:transparent;}}
+  .events{margin-top:12px;max-height:260px;overflow-y:auto;font-size:12.5px;}
+  .events .ev{display:flex;gap:10px;padding:5px 4px;border-bottom:1px solid var(--line);cursor:pointer;align-items:baseline;}
+  .events .ev:hover{background:#202836;}
+  .events .tm{color:var(--muted);flex:none;font-variant-numeric:tabular-nums;}
+  .events .esym{font-weight:700;flex:none;min-width:54px;}
+  .star{cursor:pointer;color:var(--muted);}
+  .star:hover{color:var(--amber);} .star.on{color:var(--amber);cursor:default;}
+  .halt{color:var(--amber);font-weight:700;font-size:11px;}
 </style>
 </head>
 <body>
@@ -170,9 +198,52 @@
     <div class="hint">限价：用上方价格作母单，三单同时挂（零空窗）。市价：以市价成交，用<b>真实成交价</b>算止盈止损。</div>
   </section>
 
-  <!-- 右：报价 / 持仓 / 挂单 -->
+  <!-- 右：看盘（报价/成交） ↔ 雷达 切换；持仓/挂单两个视图常驻 -->
   <div class="right">
-    <section class="card">
+    <div class="viewtabs" id="viewtabs">
+      <button data-v="watch">看盘</button>
+      <button data-v="radar" id="tabRadar">📡 异动雷达</button>
+    </div>
+
+    <section class="card v-radar" id="radarCard" style="display:none">
+      <h2 style="display:flex;align-items:center;gap:10px;">异动雷达
+        <button id="muteBtn" title="声音提醒开关">🔔</button>
+        <span id="radarFallback" style="text-transform:none;letter-spacing:0;"></span>
+      </h2>
+      <div class="radarbar">
+        <span id="radarScan">扫描 —</span>
+        <span id="radarSubs">订阅 —</span>
+        <span class="mut">点行 → 填入左侧下单票；☆ → 加自选</span>
+      </div>
+      <div class="radarfilters">
+        <span>最低日成交额 $<input id="fMinDol" type="number" step="1" min="0" value="2" />M</span>
+        <span>最大点差 <input id="fMaxSpr" type="number" step="0.1" min="0" value="0.5" />%</span>
+        <label style="display:flex;gap:5px;align-items:center;cursor:pointer;">
+          <input id="fHideWarm" type="checkbox" style="width:auto;" /> 隐藏预热中</label>
+        <span class="mut" style="font-size:11px;">（仅影响显示与声音；自选标的不被过滤）</span>
+      </div>
+      <div class="boards">
+        <div class="board">
+          <h3 class="u">🔺 急拉榜</h3>
+          <table>
+            <thead><tr><th></th><th>代码</th><th>价</th><th>1m%</th><th>5m%</th><th>日%</th>
+              <th>RVOL</th><th>量爆</th><th>VWAP±</th><th>点差%</th><th>分</th></tr></thead>
+            <tbody id="radarUp"><tr><td colspan="11" class="empty">等待扫描…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="board">
+          <h3 class="d">🔻 急跌榜</h3>
+          <table>
+            <thead><tr><th></th><th>代码</th><th>价</th><th>1m%</th><th>5m%</th><th>日%</th>
+              <th>RVOL</th><th>量爆</th><th>VWAP±</th><th>点差%</th><th>分</th></tr></thead>
+            <tbody id="radarDown"><tr><td colspan="11" class="empty">等待扫描…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="events" id="radarEvents"></div>
+    </section>
+
+    <section class="card v-watch">
       <h2>报价 · 自选（点一行选中并填入下单）</h2>
       <div class="qrow">
         <input id="symInput" placeholder="代码 如 AAPL" />
@@ -207,7 +278,7 @@
       </table>
     </section>
 
-    <section class="card">
+    <section class="card v-watch">
       <h2 style="display:flex;justify-content:space-between;align-items:center;">今日订单 / 成交记录
         <button id="refreshTrades" class="btn-ghost" style="padding:3px 12px;font-size:11px;">刷新</button></h2>
       <table>
@@ -295,6 +366,12 @@ function render(st) {
     <tr><td>${esc(r.symbol)}</td><td>${r.side==='long'?'多':'空'}</td><td>${esc(r.order_type)}</td>
     <td>${r.quantity}</td><td>${fmt(r.limit_price)}</td><td>${fmt(r.stop_price)}</td>
     <td>${esc(r.status)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">无挂单</td></tr>';
+
+  // 异动雷达（disabled 时隐藏 tab 并退回看盘视图）
+  const radarOn = st.radar && st.radar.enabled !== false;
+  $('tabRadar').style.display = radarOn ? '' : 'none';
+  if (!radarOn && currentView === 'radar') setView('watch');
+  if (radarOn) renderRadar(st.radar);
 }
 
 // 今日订单/成交记录（按需从 /api/trades 拉，含已完成订单）
@@ -315,11 +392,32 @@ async function fetchTrades() {
 }
 $('refreshTrades').onclick = fetchTrades;
 
+// 在雷达榜单里找一行（quotes 没有时的价源回退）
+function radarFind(sym) {
+  const b = lastState && lastState.radar && lastState.radar.boards;
+  if (!b) return null;
+  return (b.up || []).find(x => x.symbol === sym) || (b.down || []).find(x => x.symbol === sym) || null;
+}
+
 function renderBigQuote(st) {
   const el = $('bigq');
   if (!selectedSymbol) { el.innerHTML = '<div class="ph">← 点右侧报价选择标的，或在下方输入代码</div>'; return; }
   const r = (st.quotes || []).find(x => x.symbol === selectedSymbol);
-  if (!r) { el.innerHTML = `<div class="sym">${esc(selectedSymbol)}</div><div class="ph">未在自选中 / 暂无行情，点右侧「添加」</div>`; return; }
+  if (!r) {
+    const rr = radarFind(selectedSymbol);
+    if (rr) {  // 雷达标的：用雷达指标渲染大行情
+      const cls = chgCls(rr.day_chg_pct);
+      const p = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+      el.innerHTML = `
+        <div class="sym">${esc(rr.symbol)} <span class="mut" style="font-size:11px">📡 雷达${rr.delayed ? ' · 延迟' : ''}${rr.halted ? ' · ⏸停牌' : ''}</span></div>
+        <div class="last ${cls}">${fmt(rr.last)}</div>
+        <div class="chg ${cls}">日 ${p(rr.day_chg_pct)} · 1分 ${rr.warmup_1m ? '…' : p(rr.chg_1m_pct)} · 5分 ${rr.warmup_5m ? '…' : p(rr.chg_5m_pct)}</div>
+        <div class="ba"><span>买一 <b>${fmt(rr.bid)}</b></span><span>卖一 <b>${fmt(rr.ask)}</b></span><span>量爆 <b>${rr.vol_burst == null ? '—' : rr.vol_burst.toFixed(1) + 'x'}</b></span></div>`;
+      return;
+    }
+    el.innerHTML = `<div class="sym">${esc(selectedSymbol)}</div><div class="ph">未在自选中 / 暂无行情，点右侧「添加」</div>`;
+    return;
+  }
   const chg = (r.last != null && r.close) ? (r.last - r.close) : null;
   const pct = (chg != null && r.close) ? (chg / r.close * 100) : null;
   const cls = chgCls(chg);
@@ -330,11 +428,11 @@ function renderBigQuote(st) {
     <div class="ba"><span>买一 <b>${fmt(r.bid)}</b></span><span>卖一 <b>${fmt(r.ask)}</b></span><span>昨收 <b>${fmt(r.close)}</b></span></div>`;
 }
 
-// 点报价行 → 选中 + 填代码/参考价
+// 点报价行/雷达行 → 选中 + 填代码/参考价（价源：自选行情 → 雷达榜单）
 function selectSym(sym) {
   selectedSymbol = sym;
   $('oSym').value = sym;
-  const r = (lastState && lastState.quotes || []).find(x => x.symbol === sym);
+  const r = (lastState && lastState.quotes || []).find(x => x.symbol === sym) || radarFind(sym);
   if (r) { const px = r.ask != null ? r.ask : (r.last != null ? r.last : null); if (px != null) $('oEntry').value = px; }
   if (lastState) renderBigQuote(lastState);
   // 高亮选中行
@@ -508,6 +606,160 @@ document.addEventListener('keydown', (e) => {
   if (k === 'b') buyMarket(); else if (k === 'l') buyLimit();
   else if (k === 'f') flattenAll(); else if (k === 'c') cancelAll();
 });
+
+// ====================== 异动雷达 ======================
+// 视图切换（看盘 ↔ 雷达；持仓/挂单常驻；选择持久化）
+let currentView = localStorage.getItem('ww_view') || 'watch';
+function setView(v) {
+  currentView = (v === 'radar') ? 'radar' : 'watch';
+  localStorage.setItem('ww_view', currentView);
+  document.querySelectorAll('.v-watch').forEach(el => el.style.display = currentView === 'watch' ? '' : 'none');
+  document.querySelectorAll('.v-radar').forEach(el => el.style.display = currentView === 'radar' ? '' : 'none');
+  document.querySelectorAll('#viewtabs button').forEach(b => b.classList.toggle('act', b.dataset.v === currentView));
+}
+document.querySelectorAll('#viewtabs button').forEach(b => b.onclick = () => setView(b.dataset.v));
+
+// 客户端显示过滤（仅影响显示与声音；服务端粗滤在 panel.yaml radar 配置）
+let radarFilters = { minDolM: 2, maxSpr: 0.5, hideWarm: false };
+try { radarFilters = Object.assign(radarFilters, JSON.parse(localStorage.getItem('ww_radar_filters') || '{}')); } catch (e) { /* 忽略坏存档 */ }
+$('fMinDol').value = radarFilters.minDolM;
+$('fMaxSpr').value = radarFilters.maxSpr;
+$('fHideWarm').checked = !!radarFilters.hideWarm;
+function saveRadarFilters() {
+  radarFilters = { minDolM: Number($('fMinDol').value) || 0, maxSpr: Number($('fMaxSpr').value) || 0,
+                   hideWarm: $('fHideWarm').checked };
+  localStorage.setItem('ww_radar_filters', JSON.stringify(radarFilters));
+  if (lastState && lastState.radar) renderRadar(lastState.radar);
+}
+['fMinDol', 'fMaxSpr', 'fHideWarm'].forEach(id => $(id).addEventListener('change', saveRadarFilters));
+function rowPasses(r) {
+  if (!r.watch) {  // 自选豁免显示过滤
+    if (radarFilters.minDolM > 0 && r.dollar_vol_today != null && r.dollar_vol_today < radarFilters.minDolM * 1e6) return false;
+    if (radarFilters.maxSpr > 0 && r.spread_pct != null && r.spread_pct > radarFilters.maxSpr) return false;
+  }
+  if (radarFilters.hideWarm && r.warmup_1m && r.warmup_5m) return false;
+  return true;
+}
+
+// 静音开关（持久化）
+let muted = localStorage.getItem('ww_mute') === '1';
+function applyMute() { $('muteBtn').textContent = muted ? '🔕' : '🔔'; $('muteBtn').title = muted ? '声音已关，点击开启' : '声音已开，点击静音'; }
+$('muteBtn').onclick = () => { muted = !muted; localStorage.setItem('ww_mute', muted ? '1' : '0'); applyMute(); };
+applyMute();
+
+// WebAudio 双音提醒（无音频资产；浏览器 autoplay 策略要求首次交互后才能出声）
+let audioCtx = null;
+document.addEventListener('pointerdown', () => {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* 不支持就静默 */ } }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}, { capture: true });
+function beep(freqs) {
+  if (muted || !audioCtx || audioCtx.state !== 'running') return;
+  const t0 = audioCtx.currentTime;
+  freqs.forEach((f, i) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0 + i * 0.13);
+    g.gain.exponentialRampToValueAtTime(0.22, t0 + i * 0.13 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.13 + 0.12);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t0 + i * 0.13); o.stop(t0 + i * 0.13 + 0.13);
+  });
+}
+const beepUp = () => beep([880, 1320]);   // 拉升：上行双音
+const beepDown = () => beep([440, 300]);  // 下跌：下行双音
+
+// 榜单/事件渲染（0.3s 全量重渲染下：闪烁按时间窗、声音按事件 id 水位线）
+let lastEventId = 0;
+let radarSeen = false;          // 首帧只定水位，不补播历史事件
+let prevBoardSyms = new Set();
+let flashUntil = {};            // sym → 闪烁截止时间戳
+const EVENT_LABEL = {
+  spike_1m: v => `1分钟 ${v == null ? '' : (v > 0 ? '+' : '') + v.toFixed(2) + '%'} 急动`,
+  sustained_5m: v => `5分钟连续${v != null && v < 0 ? '下跌' : '拉升'} ${v == null ? '' : (v > 0 ? '+' : '') + v.toFixed(2) + '%'}`,
+  hod_break: () => '突破日内高点',
+  lod_break: () => '跌破日内低点',
+  vol_burst: v => `放量 ${v == null ? '' : v.toFixed(1) + 'x'}`,
+  halted: () => '⏸ 停牌',
+  resumed: () => '▶ 复牌',
+};
+
+function radarRowHtml(r) {
+  const sym = esc(r.symbol);
+  const star = r.watch ? '<td class="star on" title="已在自选">★</td>'
+                       : `<td class="star" data-w="${sym}" title="加入自选">☆</td>`;
+  const halt = r.halted ? ' <span class="halt">⏸</span>' : '';
+  const dl = r.delayed ? ' <span class="mut" style="font-size:10px">延迟</span>' : '';
+  const sp = (v, d = 2) => v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(d);
+  const flash = (flashUntil[r.symbol] || 0) > Date.now() ? ' flash' : '';
+  return `<tr class="q${flash}" data-sym="${sym}">
+    ${star}<td>${sym}${halt}${dl}</td><td>${fmt(r.last)}</td>
+    <td class="${chgCls(r.chg_1m_pct)}">${r.warmup_1m ? '…' : sp(r.chg_1m_pct)}</td>
+    <td class="${chgCls(r.chg_5m_pct)}">${r.warmup_5m ? '…' : sp(r.chg_5m_pct)}</td>
+    <td class="${chgCls(r.day_chg_pct)}">${sp(r.day_chg_pct, 1)}</td>
+    <td>${r.rvol == null ? '—' : r.rvol.toFixed(1)}</td>
+    <td>${r.vol_burst == null ? '—' : r.vol_burst.toFixed(1) + 'x'}</td>
+    <td class="${chgCls(r.vwap_dist_pct)}">${sp(r.vwap_dist_pct, 1)}</td>
+    <td>${r.spread_pct == null ? '—' : r.spread_pct.toFixed(2)}</td>
+    <td class="${chgCls(r.score)}"><b>${r.score == null ? '—' : Math.abs(r.score).toFixed(1)}</b></td></tr>`;
+}
+
+function renderRadar(rd) {
+  const stt = rd.status || {};
+  $('radarScan').textContent = stt.last_scan_age_s == null ? '扫描 —'
+    : `扫描 ${Math.round(stt.last_scan_age_s)}s前`;
+  $('radarSubs').textContent = `订阅 ${stt.sub_count ?? 0}/${stt.cap ?? '—'} · 监控 ${stt.universe ?? 0} 标的`;
+  $('radarFallback').innerHTML = stt.fallback_watchlist_only
+    ? `<span class="warnbox">⚠ 扫描器不可用 · 仅监控自选${stt.scanner_error ? '（' + esc(stt.scanner_error) + '）' : ''}</span>`
+    : '';
+
+  const up = (rd.boards && rd.boards.up || []).filter(rowPasses);
+  const down = (rd.boards && rd.boards.down || []).filter(rowPasses);
+  // 新上榜闪烁（按时间窗，0.3s 重渲染不打断动画语义）
+  const nowSyms = new Set([...up, ...down].map(r => r.symbol));
+  nowSyms.forEach(s => { if (!prevBoardSyms.has(s)) flashUntil[s] = Date.now() + 1500; });
+  prevBoardSyms = nowSyms;
+  const emptyHtml = `<tr><td colspan="11" class="empty">${stt.fallback_watchlist_only ? '扫描器不可用（仅自选有数据）' : '暂无符合条件的异动'}</td></tr>`;
+  $('radarUp').innerHTML = up.length ? up.map(radarRowHtml).join('') : emptyHtml;
+  $('radarDown').innerHTML = down.length ? down.map(radarRowHtml).join('') : emptyHtml;
+
+  // 事件流（最新在前）
+  const evs = (rd.events || []).slice().reverse();
+  $('radarEvents').innerHTML = evs.map(e => {
+    const tm = e.ts ? new Date(e.ts).toLocaleTimeString('zh-CN', { hour12: false }) : '—';
+    const lbl = (EVENT_LABEL[e.type] || (() => esc(e.type)))(e.value);
+    const cls = e.dir === 'up' ? 'up' : (e.dir === 'down' ? 'down' : 'mut');
+    return `<div class="ev" data-sym="${esc(e.symbol)}"><span class="tm">${tm}</span>
+      <span class="esym ${cls}">${esc(e.symbol)}</span><span class="${cls}">${lbl}</span>
+      <span class="mut">@ ${fmt(e.price)}</span></div>`;
+  }).join('');
+
+  // 声音：只播水位线之上、且当前可见（过滤后在榜或在自选）的新事件
+  const fresh = (rd.events || []).filter(e => e.id > lastEventId);
+  if (radarSeen && fresh.length) {
+    const wl = (lastState && lastState.watchlist) || [];
+    const visible = fresh.filter(e => nowSyms.has(e.symbol) || wl.includes(e.symbol));
+    if (visible.some(e => e.dir === 'up')) beepUp();
+    if (visible.some(e => e.dir === 'down')) beepDown();
+  }
+  lastEventId = Math.max(lastEventId, rd.next_event_id || 0, ...fresh.map(e => e.id));
+  radarSeen = true;
+}
+
+// 雷达卡事件委托：☆ 加自选；点行/点事件 → 填单
+$('radarCard').addEventListener('click', async (e) => {
+  const star = e.target.closest('[data-w]');
+  if (star) {
+    const r = await fetch('/api/watch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ symbol: star.getAttribute('data-w') }) });
+    render(await r.json());
+    return;
+  }
+  const el = e.target.closest('[data-sym]');
+  if (el) selectSym(el.getAttribute('data-sym'));
+});
+setView(currentView);
+// ====================== 雷达结束 ======================
 
 // --- WebSocket 实时推送 ---
 let ws;

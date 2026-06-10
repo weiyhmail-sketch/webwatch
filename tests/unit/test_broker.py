@@ -46,6 +46,123 @@ class TestConnectDisconnectsFirst:
         assert bm.is_connected() is False
 
 
+class _FakeEvent:
+    def __iadd__(self, handler: Any) -> _FakeEvent:
+        return self
+
+
+class _ConnFakeIB:
+    """connect() 成功路径所需的最小 IB 面：事件挂接/账户探测/PnL/行情类型。"""
+
+    def __init__(self) -> None:
+        self.errorEvent = _FakeEvent()
+
+    def isConnected(self) -> bool:  # noqa: N802
+        return True
+
+    def managedAccounts(self) -> list[str]:  # noqa: N802
+        return ["DU111"]
+
+    def reqPnL(self, account: str) -> None:  # noqa: N802
+        return None
+
+    def reqMarketDataType(self, t: int) -> None:  # noqa: N802
+        return None
+
+    def disconnect(self) -> None:
+        return None
+
+
+class _RadarSpy:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.claim = False
+
+    def attach(self, ib: Any) -> None:
+        self.calls.append("attach")
+
+    def detach(self) -> None:
+        self.calls.append("detach")
+
+    def start(self) -> None:
+        self.calls.append("start")
+
+    async def stop(self) -> None:
+        self.calls.append("stop")
+
+    def handles_error(self, req_id: int, code: int, msg: str, contract: Any = None) -> bool:
+        self.calls.append(f"err:{code}")
+        return self.claim
+
+    async def on_market_data_type_changed(self) -> None:
+        self.calls.append("mdt")
+
+    def snapshot_dict(self) -> dict[str, Any]:
+        return {"enabled": True, "spy": True}
+
+
+class TestRadarWiring:
+    """雷达接线（纯加法）：生命周期 / 错误认领 / 行情类型联动 / 快照键。"""
+
+    def _bm(self) -> tuple[BrokerManager, _RadarSpy]:
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        spy = _RadarSpy()
+        bm._radar = spy  # type: ignore[assignment]
+        return bm, spy
+
+    async def test_disconnect_stops_and_detaches_radar(self) -> None:
+        bm, spy = self._bm()
+        await bm.disconnect()
+        assert "stop" in spy.calls and "detach" in spy.calls
+
+    async def test_failed_connect_detaches_radar_never_starts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def boom(*a: object, **k: object) -> None:
+            raise RuntimeError("no gateway")
+
+        monkeypatch.setattr("webwatch.broker.connect_paper_async", boom)
+        bm, spy = self._bm()
+        await bm.connect()
+        assert "start" not in spy.calls
+        assert "detach" in spy.calls
+
+    async def test_successful_connect_attaches_then_starts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def ok(*a: object, **k: object) -> None:
+            return None
+
+        monkeypatch.setattr("webwatch.broker.connect_paper_async", ok)
+        monkeypatch.setattr("webwatch.broker.IB", _ConnFakeIB)
+        monkeypatch.setattr(
+            "webwatch.broker.IbBrokerAdapter",
+            lambda ib, paper_account: SimpleNamespace(),
+        )
+        bm, spy = self._bm()
+        await bm.connect()
+        assert bm.is_connected() is True
+        assert spy.calls[-2:] == ["attach", "start"]
+
+    async def test_on_ib_error_defers_to_radar(self) -> None:
+        bm, spy = self._bm()
+        spy.claim = True
+        bm._on_ib_error(7, 162, "scanner blocked", None)
+        assert bm.snapshot()["error"] is None  # 雷达认领 → 不进全局错误横幅
+        spy.claim = False
+        bm._on_ib_error(8, 10197, "no market data", None)
+        assert "10197" in (bm.snapshot()["error"] or "")
+
+    async def test_set_market_data_type_notifies_radar(self) -> None:
+        bm, spy = self._bm()
+        await bm.set_market_data_type(3)
+        assert "mdt" in spy.calls
+
+    def test_snapshot_contains_radar_key(self) -> None:
+        bm, _ = self._bm()
+        assert bm.snapshot()["radar"] == {"enabled": True, "spy": True}
+
+
 class TestIsLiveAndSnapshot:
     def test_is_live_reflects_environment(self) -> None:
         paper = BrokerManager(IBKRSettings(environment=Environment.PAPER), PanelConfig({}))

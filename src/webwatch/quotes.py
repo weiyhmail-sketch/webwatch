@@ -46,8 +46,11 @@ def _num(value: float | None) -> float | None:
 class QuoteService:
     """管理 watchlist 的实时行情订阅。连接由外部注入（broker 持有同一 IB 实例）。"""
 
-    def __init__(self, market_data_type: int = 1) -> None:
+    def __init__(self, market_data_type: int = 1, generic_ticks: str = "") -> None:
         self._mdt = market_data_type if market_data_type in _VALID_TYPES else 1
+        # generic tick 列表（如 "233,165"：RTVolume/vwap、90日均量），雷达复用自选行情时
+        # 需要这些字段。延迟行情(3/4)不支持 generic tick，订阅时自动传空。
+        self._generic_ticks = generic_ticks
         self._ib: IB | None = None
         self._watchlist: list[str] = []  # 保持添加顺序
         self._contracts: dict[str, Stock] = {}
@@ -91,8 +94,10 @@ class QuoteService:
             contract = Stock(sym, "SMART", "USD")
             await self._ib.qualifyContractsAsync(contract)
             self._contracts[sym] = contract
-            # snapshot=False → 持续 streaming；regulatorySnapshot=False → 不额外收费快照
-            self._tickers[sym] = self._ib.reqMktData(contract, "", False, False)
+            # snapshot=False → 持续 streaming；regulatorySnapshot=False → 不额外收费快照。
+            # 实时/冻结才带 generic tick（延迟行情不支持，传了会每标的报错）。
+            generic = self._generic_ticks if self._mdt in (1, 2) else ""
+            self._tickers[sym] = self._ib.reqMktData(contract, generic, False, False)
         except Exception as exc:  # noqa: BLE001 — 单标的订阅失败不应拖垮整个面板
             log.warning("subscribe %s failed: %s: %s", sym, type(exc).__name__, exc)
 
@@ -138,6 +143,10 @@ class QuoteService:
 
     def watchlist(self) -> list[str]:
         return list(self._watchlist)
+
+    def ticker(self, symbol: str) -> Ticker | None:
+        """裸 ticker 访问（雷达复用自选标的的行情流，避免同一标的双重订阅）。"""
+        return self._tickers.get(sanitize_symbol(symbol))
 
     def quotes(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []

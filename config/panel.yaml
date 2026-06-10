@@ -52,3 +52,36 @@ hotkeys:
   limit_buy: "l"
   flatten_all: "f"
   cancel_all: "c"
+
+# 异动雷达（display-only 分析，不进下单链路）。
+# 数值含义见 src/webwatch/config.py::RadarConfig；改前先跑 scripts/check_radar.py。
+radar:
+  enabled: true
+  max_subscriptions: 35          # 雷达自有行情线上限（总线~100，与自选/持仓共存）
+  scan_codes: ["TOP_PERC_GAIN", "TOP_PERC_LOSE", "HOT_BY_VOLUME"]
+  scan_interval_s: 25
+  scan_timeout_s: 10
+  scan_rows: 50
+  instrument: "STK"
+  location: "STK.US.MAJOR"
+  min_price: 1.0                 # 扫描级粗滤：$1 以下仙股噪音大
+  min_scan_volume: 100000
+  min_dollar_volume_usd: 2000000 # 服务端粗滤：日成交额 ≥ $2M（自选豁免）
+  max_spread_pct: 0.5            # 点差占比 > 0.5% 不上榜（自选豁免）
+  board_size: 15
+  evict_after_s: 180
+  max_evictions_per_cycle: 5
+  empty_scans_for_fallback: 3    # 连续 N 轮空扫 → 仅自选模式 + 退避
+  volume_lot_multiplier: 1       # check_radar.py 核实：lots 报量的 gateway 设 100
+  # generic_ticks: "233,165,293,294,295,595"   # 595 报错时改为 "233,165,293,294,295"
+  thresholds:
+    spike_1m_pct: 0.5            # 1 分钟 ±0.5% → 急拉急杀事件
+    sustained_5m_pct: 1.0        # 5 分钟 ±1.0% 且连续同向 K ≥ N → 持续拉升/下跌
+    sustained_min_candles: 3
+    vol_burst_ratio: 8.0         # 1 分钟量 ≥ 8× 均速（且有价动）→ 放量事件
+    event_cooldown_s: 120        # 同标的同类型事件冷却
+  score_weights:
+    w_1m: 1.0
+    w_5m: 0.5
+    w_day: 0.1
+    w_vol: 0.3

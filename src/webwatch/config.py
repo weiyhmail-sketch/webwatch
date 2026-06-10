@@ -17,6 +17,7 @@ import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from webwatch.pricing import Target, TargetKind
+from webwatch.radar_metrics import ScoreWeights, Thresholds
 
 # 仓库根目录：.../webwatch（本文件在 src/webwatch/config.py，上溯三层）
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -141,6 +142,55 @@ def _parse_target(raw: Any, default_kind: str, default_value: str) -> Target:
     return Target(kind=kind, value=value)
 
 
+class RadarConfig:
+    """异动雷达配置（display-only 分析链路）。
+
+    本块阈值/权重用 **float**——沿 quotes.py 的展示链路先例：雷达指标只用于
+    展示/排序/提醒，绝不进下单链路（下单金额仍全程 Decimal）。
+    """
+
+    def __init__(self, raw: dict[str, Any]) -> None:
+        self.enabled = bool(raw.get("enabled", True))
+        # 雷达自有行情订阅上限（自选由 QuoteService 持有，不计入）。总线默认 ~100。
+        self.max_subscriptions = int(raw.get("max_subscriptions", 35))
+        codes = raw.get("scan_codes") or ["TOP_PERC_GAIN", "TOP_PERC_LOSE", "HOT_BY_VOLUME"]
+        self.scan_codes: list[str] = [str(c) for c in codes]
+        self.scan_interval_s = float(raw.get("scan_interval_s", 25))
+        self.scan_timeout_s = float(raw.get("scan_timeout_s", 10))
+        self.scan_rows = int(raw.get("scan_rows", 50))  # IB 单扫上限 50
+        self.instrument = str(raw.get("instrument", "STK"))
+        self.location = str(raw.get("location", "STK.US.MAJOR"))
+        # 扫描级粗滤（挡仙股/死票噪音；用户「不限价格只看活跃度」→ 默认仅 $1 下限）。
+        self.min_price = float(raw.get("min_price", 1.0))
+        self.min_scan_volume = int(raw.get("min_scan_volume", 100_000))
+        # 服务端粗滤（自选豁免）：日成交额下限 / 点差占比上限。
+        self.min_dollar_volume_usd = float(raw.get("min_dollar_volume_usd", 2_000_000))
+        self.max_spread_pct = float(raw.get("max_spread_pct", 0.5))
+        self.board_size = int(raw.get("board_size", 15))
+        self.evict_after_s = float(raw.get("evict_after_s", 180))
+        self.max_evictions_per_cycle = int(raw.get("max_evictions_per_cycle", 5))
+        self.empty_scans_for_fallback = int(raw.get("empty_scans_for_fallback", 3))
+        # 部分旧 gateway 按 lots(×100) 报量；scripts/check_radar.py 核实后设 100。
+        self.volume_lot_multiplier = float(raw.get("volume_lot_multiplier", 1))
+        # generic tick 列表（实时行情时用；延迟行情自动传空）。595 不可用就删掉它。
+        self.generic_ticks = str(raw.get("generic_ticks", "233,165,293,294,295,595"))
+        th = raw.get("thresholds", {}) or {}
+        self.thresholds = Thresholds(
+            spike_1m_pct=float(th.get("spike_1m_pct", 0.5)),
+            sustained_5m_pct=float(th.get("sustained_5m_pct", 1.0)),
+            sustained_min_candles=int(th.get("sustained_min_candles", 3)),
+            vol_burst_ratio=float(th.get("vol_burst_ratio", 8.0)),
+            event_cooldown_s=float(th.get("event_cooldown_s", 120)),
+        )
+        sw = raw.get("score_weights", {}) or {}
+        self.score_weights = ScoreWeights(
+            w_1m=float(sw.get("w_1m", 1.0)),
+            w_5m=float(sw.get("w_5m", 0.5)),
+            w_day=float(sw.get("w_day", 0.1)),
+            w_vol=float(sw.get("w_vol", 0.3)),
+        )
+
+
 class PanelConfig:
     """面板默认参数。金额/比例一律 ``Decimal``。"""
 
@@ -181,6 +231,8 @@ class PanelConfig:
         self.commission_per_share_usd = Decimal(str(comm.get("per_share_usd", "0.0035")))
         self.commission_min_per_order_usd = Decimal(str(comm.get("min_per_order_usd", "0.35")))
         self.hotkeys: dict[str, str] = dict(raw.get("hotkeys", {}) or {})
+        # 异动雷达（display-only；float 先例见 RadarConfig docstring）。
+        self.radar = RadarConfig(raw.get("radar", {}) or {})
 
 
 def load_panel_config(config_dir: Path = CONFIG_DIR) -> PanelConfig:
@@ -200,6 +252,7 @@ __all__ = [
     "IBKRSettings",
     "BracketMode",
     "PanelConfig",
+    "RadarConfig",
     "secrets_path",
     "load_settings",
     "load_panel_config",

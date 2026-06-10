@@ -4,8 +4,7 @@
 > 协作约定见 [CLAUDE.md](CLAUDE.md)，完整方案见 plan 文件
 > `~/.claude/plans/ibkr-api-jaunty-sprout.md`。
 
-最后更新：**2026-06-10**（全项目审计 → P0/P1 全修：裸仓 P0、Web 安全 3×P0、模式B验证、
-平仓成交验证、SHORT 保证金、tick 边界；182 单测全绿）
+最后更新：**2026-06-10**（审计修复轮落盘 + **M9 异动雷达页**代码完成；259 单测全绿）
 
 ---
 
@@ -29,10 +28,53 @@ IBKR 手动超短线下单**可视化面板**：输入代码 → 市价/限价�
 | M5 | 风控 + 撤单/全平 + 热键 | ✅ 完成，80 单测全绿 |
 | M6 | paper 验证 1–2 天 | ⏳ 待用户盘中实操（需行情权限）|
 | M7 | 切 live 闸门（二重互锁 + 醒目标识 + 首周上限 + 每笔确认）| ✅ 代码完成，106 单测；实际切 live 待 M6 通过 + 用户批准 |
+| M9 | **异动雷达页**（全市场扫描+自选 异动监控/榜单/事件/声音）| ✅ 代码完成，259 单测；扫描器权限待 `check_radar.py` 盘中验证 |
 
 ---
 
-## 全项目审计 + 修复（2026-06-10，本轮）
+## M9 — 异动雷达页（2026-06-10，本轮）
+
+用户需求：新页面监控**正在剧烈波动**的股票（快速拉升/快速下跌），第一时间发现并一键进下单流程。
+确认的需求：①全市场扫描+自选并入 ②抓 1 分钟急拉急杀 + 1-5 分钟连续拉升/下跌 ③不限价格只看
+活跃度（成交额/点差过滤，页面可调）④榜单实时排序+新上榜闪烁+声音提醒（涨跌不同音、可静音）。
+方案细节见 plan `~/.claude/plans/majestic-moseying-pine.md`。
+
+**架构**（display-only 分析链路，float 先例同 quotes.py，**零下单链路功能改动**）：
+- [radar_metrics.py](src/webwatch/radar_metrics.py)：全部指标/事件/榜单/订阅预算为**纯函数**（45 测）。
+  指标：1m%/5m%（±25% 容差滚动窗）、日内%、RVOL（日量/90日均量纯比值）、量爆（1分钟量/每分钟基线）、
+  VWAP偏离、连续同向 1 分 K、破日高/低、点差%、停牌、综合分
+  `(w·1m + w·5m + w·日) × clamp(1+w·log10(burst))`（双预热退化为日%，新标的立刻可排序）。
+  事件：spike_1m(±0.5%)/sustained_5m(连3根+±1%)/hod·lod_break/vol_burst(8x+有价动)/halted·resumed，
+  按 (标的,类型) 冷却 120s。
+- [radar.py](src/webwatch/radar.py)::`RadarService`（20 测）：25s 扫描循环（TOP_PERC_GAIN/LOSE/
+  HOT_BY_VOLUME 名次交错合并）+ 1s 采样计算循环。**防泄漏关键**（读 ib_async 2.1.0 源码核实）：
+  `reqScannerDataAsync` 超时会泄漏 server 端 scanner 订阅（IB 上限~10）→ 改用
+  `reqScannerSubscription` + 轮询 + finally 公开 `cancelScannerSubscription`。
+  订阅预算 cap 35 + 确定性驱逐（失联>180s 最旧优先，自选/在榜保护，每轮≤5，空扫不驱逐）；
+  连续 3 轮空扫 → 仅自选 fallback + 指数退避（封顶 10min）；行情类型切换联动重订+窗口重预热。
+- [broker.py](src/webwatch/broker.py) 纯加法接线：生命周期、`handles_error` 认领雷达错误
+  （防无权限扫描刷屏全局横幅）、snapshot 加 `radar` 键（搭 0.3s WS 顺风车）。
+- [quotes.py](src/webwatch/quotes.py)：`generic_ticks`（"233,165,293,294,295,595"→ vwap/90日均量/
+  量速；延迟行情自动传空）+ `ticker()` 访问器——**自选标的不被雷达重复订阅**。
+- [前端](src/webwatch/web/index.html)：右栏「看盘↔📡异动雷达」tab（持仓/挂单两视图常驻），
+  急拉/急跌双榜（11 列，<1280px 折单列）、事件流、WebAudio 双音（涨 880→1320Hz/跌 440→300Hz，
+  🔔静音持久化，事件 id 水位线防重播）、新上榜 1.5s 闪烁、客户端过滤（成交额/点差/隐藏预热,
+  localStorage）、**点行→selectSym 填单**（雷达价源回退）、☆ 一键加自选。
+- 配置：[panel.yaml](config/panel.yaml) `radar:` 块（阈值/权重/预算/扫描参数全可调）。
+
+**验证**：259 单测全绿（182→259），mypy --strict + ruff 通过；无 Gateway 启动面板 + 预览注入
+模拟数据实测：榜单/事件渲染、点行填单（HOTX@卖一价入票）、视图/静音/过滤持久化、双榜响应式。
+快照出口全 NaN 清洗（`json.dumps(allow_nan=False)` 断言）。
+
+**⚠️ 待用户（盘中）**：
+1. `uv run python scripts/check_radar.py` —— 验证扫描器权限、**成交量单位**（AAPL 日量应为
+   4000万-6000万股级；若 ~50万 → panel.yaml 设 `volume_lot_multiplier: 100`）、generic tick 595
+   可用性（报错则从 `radar.generic_ticks` 删掉）。无扫描器权限时雷达自动退化为仅自选+横幅提示。
+2. 盘中开雷达对照 TWS Top % Gainers 看排名合理性；点榜下 1 股 paper 单走通全链路。
+
+---
+
+## 全项目审计 + 修复（2026-06-10）
 
 3 个审计代理（钱链路/Web 安全/工程质量）全面审计后按 TDD 修复全部 P0/P1 + 主要 P2：
 
@@ -322,6 +364,8 @@ round-2 的复核又发现 1 个 P0（我在 round-2 复审包 §C 候选-2 自�
   可用 `review-bundle-generator` skill 打包。
 - [ ] **下一步：M6 盘中验证**（需美股开盘 + 行情权限）：市价买入真实成交 → 自动挂 OCA；
   限价 bracket 已验证；撤单/全平/热键在 paper 上点一遍。代码已就绪，等盘中。
+- [ ] **M9 雷达盘中验证**：先跑 `scripts/check_radar.py`（扫描器权限/量单位/595），再开雷达
+  对照 TWS 榜单 + 点榜下 1 股 paper 单。详见上方 M9 节「待用户」。
 - [ ] **M7 切 live 闸门**：双重确认 + live 醒目标识 + 首周小手数上限，用户明确批准后切 4001。
 - [ ] 全部下单代码（M2–M5）建议过一轮 ChatGPT/另 session 复核（pricing/order_service/broker/risk）。
 

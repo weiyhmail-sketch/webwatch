@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "webwatch",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "uvicorn", "webwatch.app:app", "--port", "8642"],
+      "port": 8642
+    }
+  ]
+}

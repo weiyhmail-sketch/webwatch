@@ -27,6 +27,7 @@ class FakeIBQ:
     def __init__(self) -> None:
         self.mdt = 0
         self.subscribed: list[str] = []
+        self.generics: list[str] = []  # 每次订阅传的 genericTickList
         self.cancelled: list[str] = []
 
     def isConnected(self) -> bool:  # noqa: N802
@@ -40,6 +41,7 @@ class FakeIBQ:
 
     def reqMktData(self, contract: Any, *args: Any) -> FakeTicker:  # noqa: N802
         self.subscribed.append(contract.symbol)
+        self.generics.append(args[0] if args else "")
         return FakeTicker(self.mdt)
 
     def cancelMktData(self, contract: Any) -> None:  # noqa: N802
@@ -137,6 +139,39 @@ class TestMarketDataType:
         qs.attach(FakeIBQ())
         with pytest.raises(ValueError):
             await qs.set_market_data_type(7)
+
+
+class TestGenericTicksAndTickerAccessor:
+    async def test_generic_ticks_passed_on_realtime(self) -> None:
+        qs = QuoteService(market_data_type=1, generic_ticks="233,165")
+        ib = FakeIBQ()
+        qs.attach(ib)
+        await qs.subscribe("aapl")
+        assert ib.generics == ["233,165"]
+
+    async def test_generic_ticks_empty_on_delayed(self) -> None:
+        # 延迟行情不支持 generic tick → 传空，避免每标的报错
+        qs = QuoteService(market_data_type=3, generic_ticks="233,165")
+        ib = FakeIBQ()
+        qs.attach(ib)
+        await qs.subscribe("aapl")
+        assert ib.generics == [""]
+
+    async def test_switch_to_delayed_resubscribes_without_generics(self) -> None:
+        qs = QuoteService(market_data_type=1, generic_ticks="233,165")
+        ib = FakeIBQ()
+        qs.attach(ib)
+        await qs.subscribe("aapl")
+        await qs.set_market_data_type(3)
+        assert ib.generics == ["233,165", ""]
+
+    async def test_ticker_accessor(self) -> None:
+        qs = QuoteService()
+        qs.attach(FakeIBQ())
+        await qs.subscribe("aapl")
+        assert qs.ticker("aapl") is not None  # 大小写/脏字符走同一清洗
+        assert qs.ticker("AAPL") is qs.ticker("aapl")
+        assert qs.ticker("MSFT") is None
 
 
 class TestDetach:

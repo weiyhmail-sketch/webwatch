@@ -32,6 +32,7 @@ from scalper.strategy.base import Side
 from webwatch.config import Environment, IBKRSettings, PanelConfig
 from webwatch.pricing import BracketPrices, Target, compute_bracket, stop_limit_price
 from webwatch.quotes import QuoteService
+from webwatch.radar import RadarService
 from webwatch.serialize import account_to_dict, order_to_dict, position_to_dict
 from webwatch.session import is_rth, session_label
 
@@ -158,7 +159,13 @@ class BrokerManager:
         self._adapter: IbBrokerAdapter | None = None
         self._account = ""
         # 行情独立模块（webwatch 自有，不依赖 scalper 行情代码）。
-        self._quotes = QuoteService(panel.market_data_type)
+        # generic tick 列表来自雷达配置：自选行情同样带上 vwap/均量等字段供雷达复用。
+        self._quotes = QuoteService(
+            panel.market_data_type,
+            generic_ticks=panel.radar.generic_ticks if panel.radar.enabled else "",
+        )
+        # 异动雷达（display-only）：复用自选 ticker，自己只订扫描发现的标的。
+        self._radar = RadarService(panel.radar, self._quotes)
         self._last_error: str | None = None
         # 串行化下单/平仓操作：单个 IB 连接被多个 await 处理器共享，
         # 防止并发下单交叉（OCA 组错乱、撤单撤到刚挂的保护单等）。
@@ -188,6 +195,10 @@ class BrokerManager:
         s = self._settings
         async with self._order_lock:
             # 先清旧连接，释放 clientId，避免重连时自我冲突。
+            # 雷达先停（趁旧连接还活着撤掉自有订阅），再断连。
+            with contextlib.suppress(Exception):
+                await self._radar.stop()
+            self._radar.detach()
             if self._ib is not None and self._ib.isConnected():
                 with contextlib.suppress(Exception):
                     self._ib.disconnect()
@@ -219,6 +230,9 @@ class BrokerManager:
                 # 行情：绑定连接 + 重订 watchlist
                 self._quotes.attach(ib)
                 await self._quotes.resubscribe_all()
+                # 雷达：绑定同一连接并启动扫描/计算循环（disabled 时自守卫为 no-op）。
+                self._radar.attach(ib)
+                self._radar.start()
                 log.info("connected to %s gateway", s.environment.value)
             except Exception as exc:  # noqa: BLE001 — 连接失败不崩面板，错误进 last_error 展示
                 self._last_error = _redact(f"{type(exc).__name__}: {exc}")
@@ -227,9 +241,13 @@ class BrokerManager:
                     ib.disconnect()
                 self._ib = None
                 self._adapter = None
+                self._radar.detach()
 
     async def disconnect(self) -> None:
         async with self._order_lock:
+            with contextlib.suppress(Exception):
+                await self._radar.stop()
+            self._radar.detach()
             if self._ib is not None and self._ib.isConnected():
                 self._ib.disconnect()
             self._quotes.detach()
@@ -246,6 +264,10 @@ class BrokerManager:
         """把 IBKR 真错误（如 10197 无市场数据、354 未订阅）抓到 last_error 供前端展示。"""
         if error_code in _BENIGN_IB_CODES:
             return
+        # 雷达相关错误（扫描请求 / 雷达自有订阅标的）由雷达认领进自己的状态条，
+        # 不进全局错误横幅——无权限扫描每 25s 报一次会把横幅刷死。
+        if self._radar.handles_error(req_id, error_code, _redact(error_string), contract):
+            return
         sym = f" [{contract.symbol}]" if contract is not None and hasattr(contract, "symbol") else ""
         self._last_error = _redact(f"IB {error_code}:{sym} {error_string}")
         log.warning("IB error %s: %s", error_code, _redact(error_string))
@@ -259,8 +281,11 @@ class BrokerManager:
         self._quotes.unsubscribe(symbol)
 
     async def set_market_data_type(self, mdt: int) -> int:
-        """运行时切换行情类型（实时/冻结/延迟/延迟冻结）。"""
-        return await self._quotes.set_market_data_type(mdt)
+        """运行时切换行情类型（实时/冻结/延迟/延迟冻结）。雷达自有订阅联动重订。"""
+        eff = await self._quotes.set_market_data_type(mdt)
+        with contextlib.suppress(Exception):
+            await self._radar.on_market_data_type_changed()
+        return eff
 
     # ---- 状态快照 -------------------------------------------------------
 
@@ -298,6 +323,7 @@ class BrokerManager:
             "quotes": self._quotes.quotes(),
             "watchlist": self._quotes.watchlist(),
             "pnl": self._pnl() if connected else None,
+            "radar": self._radar.snapshot_dict(),
         }
 
     def _pnl(self) -> dict[str, float | None] | None:

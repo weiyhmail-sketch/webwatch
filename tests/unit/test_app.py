@@ -164,6 +164,17 @@ class FakeBroker:
             "quotes": [{"symbol": s, "bid": None, "ask": None, "last": None, "close": None}
                        for s in self.watchlist],
             "watchlist": list(self.watchlist),
+            "radar": {
+                "enabled": True,
+                "status": {"scanner_ok": True, "scanner_error": None,
+                           "fallback_watchlist_only": False, "last_scan_age_s": 3.0,
+                           "sub_count": 1, "cap": 35, "universe": 1},
+                "boards": {"up": [{"symbol": "HOTX", "watch": False, "last": 12.3,
+                                   "score": 1.5}], "down": []},
+                "events": [{"id": 1, "ts": "2026-06-10T14:00:00+00:00", "symbol": "HOTX",
+                            "type": "spike_1m", "dir": "up", "value": 0.8, "price": 12.3}],
+                "next_event_id": 1,
+            },
         }
 
 
@@ -193,6 +204,10 @@ def test_state_endpoint() -> None:
         assert body["connected"] is True
         assert body["environment"] == "paper"
         assert body["account"]["account"] == "DU***67"
+        # 雷达状态随 snapshot 透传（boards/events/status 结构见 RadarService.snapshot_dict）
+        assert body["radar"]["enabled"] is True
+        assert body["radar"]["boards"]["up"][0]["symbol"] == "HOTX"
+        assert body["radar"]["events"][0]["type"] == "spike_1m"
 
 
 def test_watch_then_unwatch() -> None:
