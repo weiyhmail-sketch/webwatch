@@ -265,16 +265,16 @@
     <section class="card">
       <h2>持仓</h2>
       <table>
-        <thead><tr><th>代码</th><th>方向</th><th>数量</th><th>均价</th><th>现价</th><th>浮盈</th></tr></thead>
-        <tbody id="positions"><tr><td colspan="6" class="empty">无持仓</td></tr></tbody>
+        <thead><tr><th>代码</th><th>方向</th><th>数量</th><th>均价</th><th>现价</th><th>金额</th><th>浮盈</th></tr></thead>
+        <tbody id="positions"><tr><td colspan="7" class="empty">无持仓</td></tr></tbody>
       </table>
     </section>
 
     <section class="card">
       <h2>挂单（当前未成交）</h2>
       <table>
-        <thead><tr><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>限价</th><th>止损</th><th>状态</th></tr></thead>
-        <tbody id="orders"><tr><td colspan="7" class="empty">无挂单</td></tr></tbody>
+        <thead><tr><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>限价</th><th>止损</th><th>金额</th><th>状态</th></tr></thead>
+        <tbody id="orders"><tr><td colspan="8" class="empty">无挂单</td></tr></tbody>
       </table>
     </section>
 
@@ -282,7 +282,7 @@
       <h2 style="display:flex;justify-content:space-between;align-items:center;">今日订单 / 成交记录
         <button id="refreshTrades" class="btn-ghost" style="padding:3px 12px;font-size:11px;">刷新</button></h2>
       <table>
-        <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>已成</th><th>成交价</th><th>状态</th></tr></thead>
+        <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>已成</th><th>成交价</th><th>金额</th><th>状态</th></tr></thead>
         <tbody id="trades"><tr><td colspan="8" class="empty">点「刷新」加载今日订单</td></tr></tbody>
       </table>
     </section>
@@ -295,6 +295,8 @@ let isLive = false, isRth = true, sessionLabel = '';
 let selectedSymbol = '';
 let lastState = null;
 const fmt = (v, d=2) => (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
+// 金额列：数量×价格（任一缺失 → —）
+const amt = (q, px) => (q == null || px == null || isNaN(Number(q)) || isNaN(Number(px))) ? '—' : money(Number(q) * Number(px));
 const money = (v) => (v === null || v === undefined) ? '—' : Number(v).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
 // 红涨绿跌：>=0 用 up(红)，<0 用 down(绿)
 const chgCls = (v) => (v === null || v === undefined) ? 'mut' : (v >= 0 ? 'up' : 'down');
@@ -357,15 +359,17 @@ function render(st) {
     const pnl = r.unrealized_pnl;
     return `<tr><td>${esc(r.symbol)}</td><td>${r.side==='long'?'多':'空'}</td>
     <td>${r.quantity}</td><td>${fmt(r.avg_entry_price)}</td><td>${fmt(r.mark_price)}</td>
+    <td>${amt(r.quantity, r.mark_price ?? r.avg_entry_price)}</td>
     <td class="${chgCls(pnl)}">${pnl==null?'—':money(pnl)}</td></tr>`;
-  }).join('') : '<tr><td colspan="6" class="empty">无持仓</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="empty">无持仓</td></tr>';
 
   // 挂单
   const o = $('orders');
   o.innerHTML = (st.orders && st.orders.length) ? st.orders.map(r => `
     <tr><td>${esc(r.symbol)}</td><td>${r.side==='long'?'多':'空'}</td><td>${esc(r.order_type)}</td>
     <td>${r.quantity}</td><td>${fmt(r.limit_price)}</td><td>${fmt(r.stop_price)}</td>
-    <td>${esc(r.status)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">无挂单</td></tr>';
+    <td>${amt(r.quantity, r.limit_price ?? r.stop_price)}</td>
+    <td>${esc(r.status)}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">无挂单</td></tr>';
 
   // 异动雷达（disabled 时隐藏 tab 并退回看盘视图）
   const radarOn = st.radar && st.radar.enabled !== false;
@@ -383,8 +387,9 @@ function renderTrades(list) {
     const stCls = r.status === 'Filled' ? 'up' : ((r.status==='Cancelled'||r.status==='Inactive'||r.status==='ApiCancelled') ? 'mut' : '');
     return `<tr><td>${tm}</td><td>${esc(r.symbol)}</td><td class="${r.side==='BUY'?'up':'down'}">${sideZh}</td><td>${esc(r.order_type)}</td>
       <td>${r.quantity}</td><td>${r.filled}</td><td>${fmt(r.avg_fill_price)}</td>
+      <td>${r.filled > 0 ? amt(r.filled, r.avg_fill_price) : '—'}</td>
       <td class="${stCls}">${esc(r.status)}</td></tr>`;
-  }).join('') : '<tr><td colspan="8" class="empty">今日暂无订单</td></tr>';
+  }).join('') : '<tr><td colspan="9" class="empty">今日暂无订单</td></tr>';
 }
 async function fetchTrades() {
   try { const d = await (await fetch('/api/trades')).json(); renderTrades(d.trades); }
