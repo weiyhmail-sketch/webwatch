@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pandas as pd
 from scalper.execution.state_store import OrderSnapshot
@@ -11,12 +12,87 @@ from scalper.strategy.base import Side
 
 from webwatch.serialize import (
     account_to_dict,
+    ib_trade_to_order_dict,
     mask_account,
     order_to_dict,
     position_to_dict,
 )
 
 TS = pd.Timestamp("2026-06-08T14:30:00Z")
+
+# ib_async 未设置价格的哨兵（UNSET_DOUBLE）
+_UNSET = 1.7976931348623157e308
+
+
+def _ib_trade(
+    *,
+    sym: str = "AAPL",
+    action: str = "BUY",
+    otype: str = "LMT",
+    qty: float = 100.0,
+    lmt: float = _UNSET,
+    aux: float = _UNSET,
+    status: str = "Submitted",
+    oca: str = "",
+    order_id: int = 42,
+    parent_id: int = 0,
+) -> SimpleNamespace:
+    """构造形如 ib_async Trade 的对象（只含序列化用到的字段）。"""
+    return SimpleNamespace(
+        contract=SimpleNamespace(symbol=sym),
+        order=SimpleNamespace(
+            orderId=order_id,
+            parentId=parent_id,
+            action=action,
+            orderType=otype,
+            totalQuantity=qty,
+            lmtPrice=lmt,
+            auxPrice=aux,
+            ocaGroup=oca,
+        ),
+        orderStatus=SimpleNamespace(status=status),
+    )
+
+
+class TestIbTradeToOrderDict:
+    def test_stp_lmt_keeps_both_prices_and_type(self) -> None:
+        # 修 bug 的核心场景：时段外止损(STP LMT)被 scalper 适配器静默跳过 →
+        # 保护单挂着却不显示。webwatch 自有序列化必须原样保留。
+        d = ib_trade_to_order_dict(
+            _ib_trade(
+                sym="AAOI", action="SELL", otype="STP LMT",
+                lmt=99.10, aux=99.60, status="PreSubmitted",
+                oca="scalper-oca-ww-934", order_id=936,
+            )
+        )
+        assert d["order_type"] == "STP LMT"
+        assert d["limit_price"] == 99.10
+        assert d["stop_price"] == 99.60
+        assert d["side"] == "short"  # SELL 腿
+        assert d["oca_group"] == "scalper-oca-ww-934"
+        assert d["status"] == "PreSubmitted"
+        assert d["symbol"] == "AAOI"
+
+    def test_lmt_unset_aux_is_none(self) -> None:
+        d = ib_trade_to_order_dict(_ib_trade(otype="LMT", lmt=100.5))
+        assert d["limit_price"] == 100.5
+        assert d["stop_price"] is None
+        assert d["side"] == "long"
+        assert d["quantity"] == 100
+
+    def test_mkt_both_prices_none(self) -> None:
+        d = ib_trade_to_order_dict(_ib_trade(otype="MKT"))
+        assert d["limit_price"] is None
+        assert d["stop_price"] is None
+
+    def test_parent_and_oca_empty_become_none(self) -> None:
+        d = ib_trade_to_order_dict(_ib_trade(parent_id=0, oca=""))
+        assert d["parent_entry_id"] is None
+        assert d["oca_group"] is None
+
+    def test_parent_id_kept_when_set(self) -> None:
+        d = ib_trade_to_order_dict(_ib_trade(parent_id=934))
+        assert d["parent_entry_id"] == "934"
 
 
 class TestMaskAccount:

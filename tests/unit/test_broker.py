@@ -203,6 +203,51 @@ class TestIsLiveAndSnapshot:
         assert snap["environment"] == "paper"
 
 
+class _SnapshotFakeIB:
+    """snapshot 用的 fake：openTrades 返回含 STP LMT 的挂单（scalper 适配器会跳过它）。"""
+
+    def __init__(self, open_trades: list[Any]) -> None:
+        self._open = open_trades
+
+    def isConnected(self) -> bool:  # noqa: N802
+        return True
+
+    def openTrades(self) -> list[Any]:  # noqa: N802
+        return self._open
+
+    def pnl(self) -> list[Any]:
+        return []
+
+
+def _open_trade(otype: str, action: str = "SELL", status: str = "PreSubmitted") -> Any:
+    return SimpleNamespace(
+        contract=SimpleNamespace(symbol="AAOI"),
+        order=SimpleNamespace(
+            orderId=936, parentId=934, action=action, orderType=otype,
+            totalQuantity=500.0, lmtPrice=99.10, auxPrice=99.60, ocaGroup="",
+        ),
+        orderStatus=SimpleNamespace(status=status),
+    )
+
+
+class TestSnapshotOpenOrders:
+    def test_snapshot_shows_stp_lmt_protection_leg(self) -> None:
+        # 回归：挂单列表绕开 scalper 适配器的类型白名单（它会静默跳过 STP LMT），
+        # 否则时段外止损挂着却不显示，用户误以为裸仓。
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = _SnapshotFakeIB([_open_trade("STP LMT"), _open_trade("LMT")])  # type: ignore[assignment]
+        snap = bm.snapshot()
+        types = [o["order_type"] for o in snap["orders"]]
+        assert "STP LMT" in types and "LMT" in types
+        stp = next(o for o in snap["orders"] if o["order_type"] == "STP LMT")
+        assert stp["stop_price"] == 99.60 and stp["limit_price"] == 99.10
+        assert stp["status"] == "PreSubmitted"
+
+    def test_snapshot_orders_empty_when_disconnected(self) -> None:
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        assert bm.snapshot()["orders"] == []
+
+
 def _fill(shares: float, price: float, t: Any) -> Any:
     return SimpleNamespace(execution=SimpleNamespace(shares=shares, price=price, time=t))
 

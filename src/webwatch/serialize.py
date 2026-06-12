@@ -8,11 +8,26 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from scalper.execution.state_store import OrderSnapshot
 from scalper.execution.types import AccountSummary, Position
 from scalper.strategy.base import Side
+
+# ib_async 未设置价格的哨兵是 UNSET_DOUBLE(~1.8e308)；超过此阈值一律视为未设置。
+_IB_UNSET_THRESHOLD = 1e15
+
+
+def _ib_price(value: Any) -> float | None:
+    """ib_async 订单价格 → float|None（UNSET 哨兵 / NaN / 非正数 → None）。"""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f) or abs(f) >= _IB_UNSET_THRESHOLD or f <= 0:
+        return None
+    return f
 
 
 def mask_account(account: str) -> str:
@@ -69,4 +84,35 @@ def order_to_dict(o: OrderSnapshot) -> dict[str, Any]:
     }
 
 
-__all__ = ["mask_account", "position_to_dict", "account_to_dict", "order_to_dict"]
+def ib_trade_to_order_dict(t: Any) -> dict[str, Any]:
+    """ib_async ``Trade`` → 挂单 dict（webwatch 自有，**不走 scalper 适配器**）。
+
+    为什么绕开 ``list_open_orders``：scalper 适配器只认自家会下的订单类型，
+    会把 ``STP LMT``（时段外止损）等静默跳过 → 保护单明明挂在 IB，面板却不显示，
+    用户误以为裸仓。这里对所有类型原样序列化，展示以 IB 真实挂单为准。
+    字段形状与 ``order_to_dict`` 一致（前端共用同一张表）。
+    """
+    o, st = t.order, t.orderStatus
+    parent = int(getattr(o, "parentId", 0) or 0)
+    oca = str(getattr(o, "ocaGroup", "") or "")
+    return {
+        "order_id": str(o.orderId),
+        "parent_entry_id": str(parent) if parent else None,
+        "symbol": t.contract.symbol,
+        "side": "long" if o.action == "BUY" else "short",
+        "order_type": o.orderType,
+        "quantity": int(o.totalQuantity),
+        "limit_price": _ib_price(getattr(o, "lmtPrice", None)),
+        "stop_price": _ib_price(getattr(o, "auxPrice", None)),
+        "status": st.status,
+        "oca_group": oca or None,
+    }
+
+
+__all__ = [
+    "mask_account",
+    "position_to_dict",
+    "account_to_dict",
+    "order_to_dict",
+    "ib_trade_to_order_dict",
+]

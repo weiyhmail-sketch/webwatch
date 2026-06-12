@@ -33,7 +33,7 @@ from webwatch.config import Environment, IBKRSettings, PanelConfig
 from webwatch.pricing import BracketPrices, Target, compute_bracket, stop_limit_price
 from webwatch.quotes import QuoteService
 from webwatch.radar import RadarService
-from webwatch.serialize import account_to_dict, order_to_dict, position_to_dict
+from webwatch.serialize import account_to_dict, ib_trade_to_order_dict, position_to_dict
 from webwatch.session import is_rth, session_label
 
 log = logging.getLogger(__name__)
@@ -318,7 +318,8 @@ class BrokerManager:
             a = self._safe(self._adapter.account_summary)
             account = account_to_dict(a) if a is not None else None
             positions = [position_to_dict(p) for p in (self._safe(self._adapter.list_positions) or [])]
-            orders = [order_to_dict(o) for o in (self._safe(self._adapter.list_open_orders) or [])]
+        if connected:
+            orders = self._open_orders()
         return {
             "connected": connected,
             "environment": self._settings.environment.value,
@@ -336,6 +337,17 @@ class BrokerManager:
             "pnl": self._pnl() if connected else None,
             "radar": self._radar.snapshot_dict(),
         }
+
+    def _open_orders(self) -> list[dict[str, Any]]:
+        """全部活动挂单，直接读 ib_async 的 ``openTrades()``。
+
+        不走 scalper 适配器的 ``list_open_orders``：它带订单类型白名单，会把
+        ``STP LMT``（时段外止损）等静默跳过 → 保护单挂着却不显示 = 用户误以为裸仓。
+        """
+        if self._ib is None:
+            return []
+        trades = self._safe(self._ib.openTrades) or []
+        return [ib_trade_to_order_dict(t) for t in trades]
 
     def _pnl(self) -> dict[str, float | None] | None:
         """账户盈亏（当日/已实现/浮动）。读 ib.pnl() 流式订阅；未就绪/哨兵值返回 None。"""
