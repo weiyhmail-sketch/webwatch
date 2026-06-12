@@ -771,6 +771,8 @@ function connectWS() {
 connectWS();
 fetch('/api/state').then(r => r.json()).then(render);
 fetchTrades();
+// 成交记录自动刷新：下单后保护腿是异步成交的，只在下单瞬间抓快照会一直显示旧状态/无成交价
+setInterval(fetchTrades, 10000);
 </script>
 </body>
 </html>
