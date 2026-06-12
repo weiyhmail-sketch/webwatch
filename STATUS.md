@@ -110,6 +110,21 @@ best-effort 撤入场单；risk 负数量 BLOCK；单笔绝对股数上限 `max_
 **工程固化**：ruff 加 `T20`(禁 print)/`DTZ`(禁 naive datetime)/`BLE`(裸捕获须 noqa 注明)；
 mypy 改按模块 override（不再全局 ignore_missing_imports）；`.coverage` 移出 git。
 
+## 实操排障三连修（2026-06-12，paper 实测驱动）
+
+用户实际操作中暴露三个问题，全部修复（270 单测全绿）：
+- **IB 10349 盘外 bracket 拒单（已修，`8febaa0`）**：时段外 bracket 原用 GTC+outsideRth，
+  IBKR 不接受该组合 → 母单被撤、三腿全撤（保护逻辑正确兜住，无裸仓）。改为三腿显式
+  DAY+outsideRth（受支持组合，DAY 覆盖当日盘前+RTH+盘后）；RTH 分支保护腿仍 GTC。TDD。
+- **错误横幅 \uXXXX 乱码（已修，`dc722d8`）**：Gateway 把中文错误发成字面转义序列，
+  `_redact` 出口加 `_decode_ib_escapes` 还原。
+- **挂单表 STP LMT 隐身（已修，`0f726a5`）**：scalper 适配器 list_open_orders 类型白名单
+  静默跳过 STP LMT → 保护单挂着却不显示。挂单改走 webwatch 自有 `ib.openTrades()` 全类型
+  序列化（只读路径，不动 scalper / 不动下单分支）。
+- **持续障碍（用户侧）**：10197「关联的真实账户登录期间无市场数据」反复出现 ——
+  某处（疑手机 App/网页 Client Portal）live 会话未登出，占走行情线路；实时/延迟/冻结全被挡。
+  无行情时市价单(IOC)不成交 → 不会挂保护单（按设计）。需用户彻底登出竞争会话。
+
 ## ⚠️ 下单前风控已全部关闭（2026-06-10，用户明确要求）
 
 > **切 live 前必须恢复！** 当前 paper 安全，但配置 paper/live 通用——live 下手误可下任意大单无拦截。
