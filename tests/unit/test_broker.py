@@ -13,9 +13,34 @@ import pytest
 from scalper.execution.types import Position
 from scalper.strategy.base import Side
 
-from webwatch.broker import BrokerManager, EntryUncertain, ProtectionFailed, resolve_account
+from webwatch.broker import (
+    BrokerManager,
+    EntryUncertain,
+    ProtectionFailed,
+    _decode_ib_escapes,
+    _redact,
+    resolve_account,
+)
 from webwatch.config import Environment, IBKRSettings, PanelConfig
 from webwatch.pricing import Target
+
+
+class TestDecodeIbEscapes:
+    def test_decodes_literal_unicode_escapes(self) -> None:
+        # IB Gateway 把中文发成字面 \uXXXX → 应还原为中文
+        raw = "IB 10197: [AAPL] \\u5173\\u8054\\u7684\\u771f\\u5b9e\\u8d26\\u6237"
+        out = _decode_ib_escapes(raw)
+        assert "关联的真实账户" in out
+        assert "\\u" not in out
+
+    def test_plain_text_untouched(self) -> None:
+        assert _decode_ib_escapes("IB 354: not subscribed") == "IB 354: not subscribed"
+
+    def test_redact_decodes_and_redacts(self) -> None:
+        # 解码 + 账户号脱敏两件事都生效
+        out = _redact("U1234567 \\u65e0\\u5e02\\u573a\\u6570\\u636e")
+        assert "无市场数据" in out
+        assert "1234567" not in out
 
 
 class _DiscFakeIB:

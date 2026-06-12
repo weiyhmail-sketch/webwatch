@@ -80,9 +80,20 @@ class EntryUncertain(Exception):
 _ACCOUNT_RE = re.compile(r"\b(D?U)\d{4,}\b")
 
 
+def _decode_ib_escapes(text: str) -> str:
+    """IB Gateway 有时把本地化消息（中文）发成字面 ``\\uXXXX`` 转义序列。
+    还原成真正的字符，避免前端横幅显示乱码。无转义则原样返回。"""
+    if "\\u" not in text:
+        return text
+    try:
+        return text.encode("latin-1", "backslashreplace").decode("unicode_escape")
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        return text
+
+
 def _redact(text: str) -> str:
-    """错误文本脱敏：账户号绝不进前端/日志（红线 #5）。"""
-    return _ACCOUNT_RE.sub(r"\1***", text)
+    """错误文本脱敏：账户号绝不进前端/日志（红线 #5）；并还原 IB 的 \\uXXXX 中文转义。"""
+    return _ACCOUNT_RE.sub(r"\1***", _decode_ib_escapes(text))
 
 
 def _finite(value: Any) -> float | None:
