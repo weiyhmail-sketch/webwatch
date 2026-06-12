@@ -549,7 +549,7 @@ async function buyLimit() {
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
   let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
-    `确认限价${sideVerb()} ${p.symbol} ${p.quantity} 股 @ ${p.entry_limit}\n止盈 ${p.take_profit} / 止损 ${p.stop_loss}\n扣费净盈亏 ${p.net_pnl}`;
+    `确认限价${sideVerb()} ${p.symbol} ${p.quantity} 股 @ ${p.entry_limit}\n预估金额 ≈ $${money(p.notional)}\n止盈 ${p.take_profit} / 止损 ${p.stop_loss}\n扣费净盈亏 ${p.net_pnl}`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
   showOrderResult(await post('/api/order/limit', orderBody()), true);
@@ -577,7 +577,7 @@ async function buyMarket() {
   if (pr.rejected) { showOrderResult(pr, false); return; }
   const p = pr.plan;
   let msg = (isLive ? '🔴🔴 LIVE 实盘下单！真金白银！🔴🔴\n\n' : '') +
-    `确认【市价${sideVerb()}】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
+    `确认【市价${sideVerb()}】${p.symbol} ${p.quantity} 股（约 @ ${p.ref_price}）\n预估金额 ≈ $${money(p.est_notional)}\n成交后按真实成交价挂止盈止损（预览：止盈 ${p.preview_take_profit} / 止损 ${p.preview_stop_loss}）`;
   if (!isRth) msg += `\n\n⏰ 当前为${sessionLabel}（时段外）：市价不可用，将自动转「激进限价 bracket」，止损用 stop-limit。`;
   if (p.warnings && p.warnings.length) msg += '\n\n⚠ ' + p.warnings.join('\n⚠ ');
   if (!confirm(msg)) return;
