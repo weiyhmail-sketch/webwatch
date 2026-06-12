@@ -125,7 +125,10 @@ mypy 改按模块 override（不再全局 ignore_missing_imports）；`.coverage
   某处（疑手机 App/网页 Client Portal）live 会话未登出，占走行情线路；实时/延迟/冻结全被挡。
   无行情时市价单(IOC)不成交 → 不会挂保护单（按设计）。需用户彻底登出竞争会话。
 
-## ⚠️ 下单前风控已全部关闭（2026-06-10，用户明确要求）
+## 风控已恢复（2026-06-12，切 live 前置）+ 历史：曾全部关闭（2026-06-10）
+
+> 2026-06-12 用户提出切 live → 按红线#1（live 必须带首周上限）**已恢复全部原值**，
+> `test_deployed_panel_blocks_oversized_order` 锁定。以下为当时关闭的记录（已失效）：
 
 > **切 live 前必须恢复！** 当前 paper 安全，但配置 paper/live 通用——live 下手误可下任意大单无拦截。
 

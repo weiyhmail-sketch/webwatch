@@ -27,23 +27,22 @@ extended_hours_enabled: true
 aggressive_limit_ticks: 3        # 时段外"市价买入"转激进限价，贴对手价加的 tick 数
 stop_limit_offset_pct: 0.005     # 时段外 stop-limit 止损：保护限价相对触发价的缓冲
 
-# ⚠️⚠️⚠️ 下单前风控已按用户要求（2026-06-10）全部关闭 ⚠️⚠️⚠️
-#   后果：金额/股数/最大亏损/账户失效/live首周 所有上限均失效，下单前不再拦截任何单。
-#   配置 paper/live 通用 —— 切 live 实盘前务必恢复！恢复方法：把下方数值改回注释里的「原值」。
-#   max_position_risk_pct=0 是代码内置的「关闭」语义；其余用极大值等效解除。
+# 下单前风控（2026-06-12 因切 live 已恢复原值 —— 红线#1 要求 live 必须带首周上限。
+# 2026-06-10 曾按用户要求全部关闭，仅限 paper 测试期）。
 risk:
-  # 单笔 notional 上限（paper/live 通用）。原值 20000；0=不限 → 用极大值解除。
-  max_order_notional_usd: 1000000000000      # 原值 20000
-  # 单笔绝对股数上限（第二道闸）。原值 100000。
-  max_order_shares: 1000000000               # 原值 100000
-  # 单笔最大亏损 ≤ 此比例 × NAV。原值 0.005；设 0 = 关闭此检查（代码内置）。
-  max_position_risk_pct: 0                    # 原值 0.005
-  # 净值低于此值受 PDT 限制（仅提示，不拒单）。
+  # 单笔 notional 上限（下单前风控会拒超限单；paper/live 通用）。
+  # 设为 20000 以让下方 live 首周上限($20000)真正成为绑定约束。
+  max_order_notional_usd: 20000
+  # 单笔绝对股数上限（第二道闸）：仙股下 notional 上限拦不住超大手数。
+  max_order_shares: 100000
+  # 单笔最大亏损 ≤ 此比例 × NAV（镜像 scalper 0.5%）。超限拒单。
+  max_position_risk_pct: 0.005
+  # 净值低于此值时受 PDT 限制（仅提示，不拒单）。
   pdt_min_nav: 25000
-  # 账户数据不可用时超此金额拒单。原值 1000 → 极大值解除盲飞封锁。
-  account_unavailable_max_notional_usd: 1000000000000   # 原值 1000
-  # live 首周单笔 notional 上限（仅 live 生效）。原值 20000 → 极大值解除。
-  live_max_order_notional_usd: 1000000000000  # 原值 20000
+  # 账户数据不可用（账户级风控失效）时，超过此金额的单直接拒；之下仅告警。盲飞封小额。
+  account_unavailable_max_notional_usd: 1000
+  # live 首周单笔 notional 上限（仅 live 生效）。验证期压规模，稳定后再放宽。
+  live_max_order_notional_usd: 20000
 
 commission:
   per_share_usd: 0.0035       # IBKR Pro Tiered 假设（与 scalper 一致）

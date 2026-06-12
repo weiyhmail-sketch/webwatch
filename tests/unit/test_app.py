@@ -282,13 +282,15 @@ def test_order_preview_notional_rejected() -> None:
         assert "notional" in body["reason"]
 
 
-def test_deployed_panel_has_risk_disabled() -> None:
-    # 用户要求关闭下单前风控：部署 panel.yaml 应放行原本会被拦的大额单(300*100=30000)。
-    # 此用例用真实 load_panel_config()，是关闭状态的回归锁；若日后恢复上限，本用例会提醒更新。
+def test_deployed_panel_blocks_oversized_order() -> None:
+    # 2026-06-12 因切 live 恢复风控（红线#1 要求 live 必须带首周上限）：
+    # 部署 panel.yaml 应拦下超限大额单(300*100=30000 > 20000)。
+    # 此用例用真实 load_panel_config()，锁定部署配置的风控状态；改 panel.yaml 会提醒更新。
     with _client() as c:
         r = c.post("/api/order/preview", json=_order_body(quantity=300, entry_limit="100"))
         body = r.json()
-        assert body["rejected"] is False
+        assert body["rejected"] is True
+        assert "notional" in body["reason"]
 
 
 def test_order_limit_places_bracket() -> None:

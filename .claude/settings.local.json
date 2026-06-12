@@ -7,7 +7,12 @@
       "Bash(gh repo *)",
       "Bash(gh api *)",
       "Bash(cd /tmp && echo \"===== broker_adapter.py =====\"; gh api -H \"Accept: application/vnd.github.raw\" \"repos/weiyhmail-sketch/scalper/contents/src/scalper/execution/broker_adapter.py\" 2>&1 | grep -E \"def |class |\\\\.\\\\.\\\\.| -> \" | head -60)",
-      "Bash(uv sync *)"
+      "Bash(uv sync *)",
+      "Bash(grep -E \"\\\\.\\(html|js|css|json\\)$\")",
+      "Bash(python3 -c \"from ib_async import IB; import inspect; methods = [m for m in dir\\(IB\\) if 'req' in m.lower\\(\\) or 'scan' in m.lower\\(\\) or 'data' in m.lower\\(\\)]; print\\('\\\\n'.join\\(sorted\\(methods\\)\\)\\)\")",
+      "Bash(python3 -c \"import sys; sys.path.insert\\(0, '/Users/weiyuhang/Desktop/AI工程项目/webwatch/.venv/lib/python3.12/site-packages'\\); from scalper.data import vwap, bar_agg; help\\(vwap\\)\")",
+      "Bash(python3 -c \"import sys; sys.path.insert\\(0, '/Users/weiyuhang/Desktop/AI工程项目/webwatch/.venv/lib/python3.12/site-packages'\\); from scalper import data; print\\(dir\\(data\\)\\)\")",
+      "Bash(uv run *)"
     ]
   }
 }

@@ -1,0 +1,124 @@
+<svg viewBox="0 0 1175 500" xmlns="http://www.w3.org/2000/svg" width="1175" height="500">
+<defs>
+  <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#0d1117"/>
+    <stop offset="100%" stop-color="#161b22"/>
+  </linearGradient>
+  <linearGradient id="card" x1="0%" y1="0%" x2="0%" y2="100%">
+    <stop offset="0%" stop-color="#1c2333"/>
+    <stop offset="100%" stop-color="#161b22"/>
+  </linearGradient>
+  <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#ff5722"/>
+    <stop offset="100%" stop-color="#ff9800"/>
+  </linearGradient>
+</defs>
+
+<rect width="1175" height="500" fill="url(#bg)"/>
+
+<!-- subtle grid -->
+<g opacity="0.04" stroke="#e6edf3" stroke-width="1">
+  <line x1="0" y1="125" x2="1175" y2="125"/>
+  <line x1="0" y1="250" x2="1175" y2="250"/>
+  <line x1="0" y1="375" x2="1175" y2="375"/>
+  <line x1="294" y1="0" x2="294" y2="500"/>
+  <line x1="588" y1="0" x2="588" y2="500"/>
+  <line x1="882" y1="0" x2="882" y2="500"/>
+</g>
+
+<!-- LEFT SIDE -->
+<g font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', Arial, sans-serif">
+
+  <!-- Top tags row -->
+  <g transform="translate(70, 80)">
+    <rect width="80" height="26" rx="5" fill="#2ea043"/>
+    <text x="40" y="18" font-size="13" font-weight="800" fill="#fff" text-anchor="middle">PAPER</text>
+    <circle cx="100" cy="13" r="5" fill="#2ea043"/>
+    <text x="113" y="18" font-size="14" fill="#c9d1d9">已连接 IBKR</text>
+    <text x="225" y="18" font-size="14" fill="#8b949e">·  时段 常规盘</text>
+  </g>
+
+  <!-- Title -->
+  <text x="70" y="190" font-size="72" font-weight="800" fill="#e6edf3" letter-spacing="-1">IBKR Web Trader</text>
+
+  <!-- Accent bar -->
+  <rect x="70" y="208" width="170" height="5" fill="url(#accent)" rx="2"/>
+
+  <!-- Subtitle -->
+  <text x="70" y="258" font-size="24" font-weight="500" fill="#c9d1d9">连接 IBKR 的可视化交易客户端</text>
+
+  <!-- Sub-subtitle -->
+  <text x="70" y="290" font-size="17" fill="#8b949e">替代官方繁琐 UI · 注入个人交易习惯</text>
+
+  <!-- Stats row -->
+  <g transform="translate(70, 365)">
+    <text x="0" y="0" font-size="50" font-weight="800" fill="#388bfd">4</text>
+    <text x="48" y="0" font-size="22" fill="#8b949e">天</text>
+
+    <line x1="92" y1="-30" x2="92" y2="0" stroke="#2a313c" stroke-width="1"/>
+
+    <text x="115" y="0" font-size="50" font-weight="800" fill="#d29922">7680</text>
+    <text x="252" y="0" font-size="22" fill="#8b949e">行代码</text>
+
+    <line x1="335" y1="-30" x2="335" y2="0" stroke="#2a313c" stroke-width="1"/>
+
+    <text x="355" y="0" font-size="50" font-weight="800" fill="#f85149">259</text>
+    <text x="450" y="0" font-size="22" fill="#8b949e">测试全绿</text>
+  </g>
+
+  <!-- Bottom byline -->
+  <text x="70" y="465" font-size="13" fill="#6e7681">🤖  AI 协作开发  ·  MIT 开源  ·  github.com/weiyhmail-sketch/webwatch</text>
+
+</g>
+
+<!-- RIGHT SIDE: mock panel -->
+<g font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', Arial, sans-serif" transform="translate(720, 70)">
+
+  <rect width="400" height="360" rx="14" fill="url(#card)" stroke="#2a313c" stroke-width="1"/>
+
+  <!-- Header -->
+  <text x="20" y="34" font-size="11" fill="#8b949e" letter-spacing="2">报 价  ·  自 选</text>
+  <line x1="20" y1="48" x2="380" y2="48" stroke="#2a313c"/>
+
+  <!-- Column labels -->
+  <g font-size="10" fill="#8b949e">
+    <text x="20" y="70">代码</text>
+    <text x="225" y="70" text-anchor="end">最新</text>
+    <text x="365" y="70" text-anchor="end">涨跌%</text>
+  </g>
+
+  <!-- Selected row highlight -->
+  <rect x="0" y="80" width="400" height="44" fill="#23304a" opacity="0.7"/>
+
+  <!-- Quote rows -->
+  <g font-size="17" font-weight="600">
+    <text x="20" y="107" fill="#e6edf3">AAPL</text>
+    <text x="225" y="107" fill="#f85149" text-anchor="end">293.60</text>
+    <text x="365" y="107" fill="#f85149" text-anchor="end">+0.69%</text>
+
+    <text x="20" y="151" fill="#e6edf3">TSLA</text>
+    <text x="225" y="151" fill="#f85149" text-anchor="end">387.52</text>
+    <text x="365" y="151" fill="#f85149" text-anchor="end">+1.55%</text>
+
+    <text x="20" y="195" fill="#e6edf3">NVDA</text>
+    <text x="225" y="195" fill="#f85149" text-anchor="end">201.78</text>
+    <text x="365" y="195" fill="#f85149" text-anchor="end">+0.68%</text>
+
+    <text x="20" y="239" fill="#e6edf3">META</text>
+    <text x="225" y="239" fill="#2ea043" text-anchor="end">564.34</text>
+    <text x="365" y="239" fill="#2ea043" text-anchor="end">-1.16%</text>
+
+    <text x="20" y="283" fill="#e6edf3">AMD</text>
+    <text x="225" y="283" fill="#f85149" text-anchor="end">467.37</text>
+    <text x="365" y="283" fill="#f85149" text-anchor="end">+3.31%</text>
+  </g>
+
+  <!-- Footer: preview line -->
+  <line x1="20" y1="310" x2="380" y2="310" stroke="#2a313c"/>
+  <text x="20" y="338" font-size="13" fill="#8b949e">
+    预览 · 止盈 <tspan fill="#f85149" font-weight="600">294.19</tspan>
+    /  止损 <tspan fill="#2ea043" font-weight="600">292.42</tspan>
+  </text>
+
+</g>
+</svg>
