@@ -282,15 +282,15 @@ def test_order_preview_notional_rejected() -> None:
         assert "notional" in body["reason"]
 
 
-def test_deployed_panel_blocks_oversized_order() -> None:
-    # 2026-06-12 因切 live 恢复风控（红线#1 要求 live 必须带首周上限）：
-    # 部署 panel.yaml 应拦下超限大额单(300*100=30000 > 20000)。
+def test_deployed_panel_allows_large_notional() -> None:
+    # 2026-06-12（live 当天）用户两次确认取消单笔金额上限 + 最大亏损上限：
+    # 部署 panel.yaml 应放行 $30000 大额单（金额天花板交给 IBKR 保证金）。
     # 此用例用真实 load_panel_config()，锁定部署配置的风控状态；改 panel.yaml 会提醒更新。
+    # 股数上限（100000）与账户失效保护（$1000）仍保留，由 _capped_client 系列覆盖逻辑。
     with _client() as c:
         r = c.post("/api/order/preview", json=_order_body(quantity=300, entry_limit="100"))
         body = r.json()
-        assert body["rejected"] is True
-        assert "notional" in body["reason"]
+        assert body["rejected"] is False
 
 
 def test_order_limit_places_bracket() -> None:
