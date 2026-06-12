@@ -459,10 +459,18 @@ class BrokerManager:
                 # 普通 STP → STP-LMT（时段外可用）。auxPrice(触发价) 不变，补限价。
                 bracket.stopLoss.orderType = "STP LMT"
                 bracket.stopLoss.lmtPrice = float(stop_limit)
-            # 保护腿一律 GTC（候选-3 推广到 RTH）：DAY 子单在收盘/session 边界过期 →
-            # 母单成交后隔夜裸仓。母单保持 DAY（入场限价不该 resting 过夜）。
-            bracket.takeProfit.tif = "GTC"
-            bracket.stopLoss.tif = "GTC"
+                # IBKR 不接受 GTC+outsideRth → 错误 10349「TIF was set to DAY based on order
+                # preset」会强制改 TIF 并撤掉母单。改用受支持的 DAY+outsideRth：DAY 覆盖当日
+                # 盘前+RTH+盘后整段，对分钟级超短线足够；不跨日，避免 GTC 残单。显式三腿设
+                # DAY 还能压住 Gateway 订单预设覆盖 TIF（10349 的诱因）。
+                bracket.parent.tif = "DAY"
+                bracket.takeProfit.tif = "DAY"
+                bracket.stopLoss.tif = "DAY"
+            else:
+                # RTH 保护腿用 GTC：DAY 子单在收盘/session 边界过期 → 母单成交后隔夜裸仓。
+                # 母单保持 DAY（入场限价不该 resting 过夜）。
+                bracket.takeProfit.tif = "GTC"
+                bracket.stopLoss.tif = "GTC"
             trades = [ib.placeOrder(contract, order) for order in bracket]
             try:
                 await self._verify_bracket_accepted(trades, timeout=self._protect_timeout_s)

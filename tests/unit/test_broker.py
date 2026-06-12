@@ -393,9 +393,11 @@ class TestPlaceLimitBracket:
         assert all(o.outsideRth for o in b)  # 三条腿都 outsideRth
         assert b.stopLoss.orderType == "STP LMT"
         assert b.stopLoss.lmtPrice == 99.10
-        # 候选-3：保护腿用 GTC，避免 session 边界过期裸仓
-        assert b.takeProfit.tif == "GTC"
-        assert b.stopLoss.tif == "GTC"
+        # 时段外：IBKR 拒绝 GTC+outsideRth（错误 10349 强制改 TIF → 母单被撤）。
+        # 三腿全部用受支持的 DAY+outsideRth；显式设 DAY 还可压住 Gateway 预设覆盖 TIF。
+        assert b.parent.tif == "DAY"
+        assert b.takeProfit.tif == "DAY"
+        assert b.stopLoss.tif == "DAY"
 
     async def test_rth_bracket_children_use_gtc(self) -> None:
         # RTH 分支保护腿也必须 GTC：临近收盘成交后 DAY 子单收盘过期 → 隔夜裸仓。
