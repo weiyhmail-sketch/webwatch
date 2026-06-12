@@ -313,9 +313,10 @@ function render(st) {
   $('dot').className = 'dot ' + (st.connected ? 'on' : 'off');
   $('conn').textContent = st.connected ? '已连接' : '未连接';
   isLive = !!st.is_live;
+  // live 不再显示全宽脉冲横幅（按用户要求，2026-06-12）：live 标识保留为
+  // 顶栏静态红色 LIVE 徽章 + 每笔下单确认框的 LIVE 前缀（红线#1 的醒目标识不可全部移除）。
   const bar = $('livebar');
-  if (isLive) { bar.className = 'live'; bar.textContent = '🔴 LIVE 实盘 — 真金白银，每笔下单都用真实资金成交'; }
-  else if (st.env_warning) { bar.className = 'warn'; bar.textContent = '⚠ ' + st.env_warning; }
+  if (st.env_warning) { bar.className = 'warn'; bar.textContent = '⚠ ' + st.env_warning; }
   else { bar.className = ''; bar.textContent = ''; }
   $('err').textContent = st.error ? ('⚠ ' + st.error) : '';
   if (document.activeElement !== $('mdtype')) $('mdtype').value = String(st.market_data_type || 1);
