@@ -282,7 +282,7 @@
       <h2 style="display:flex;justify-content:space-between;align-items:center;">今日订单 / 成交记录
         <button id="refreshTrades" class="btn-ghost" style="padding:3px 12px;font-size:11px;">刷新</button></h2>
       <table>
-        <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>已成</th><th>成交价</th><th>金额</th><th>状态</th></tr></thead>
+        <thead><tr><th>时间</th><th>代码</th><th>方向</th><th>类型</th><th>数量</th><th>已成</th><th>成交价</th><th>金额</th><th>盈亏</th><th>状态</th></tr></thead>
         <tbody id="trades"><tr><td colspan="8" class="empty">点「刷新」加载今日订单</td></tr></tbody>
       </table>
     </section>
@@ -388,8 +388,9 @@ function renderTrades(list) {
     return `<tr><td>${tm}</td><td>${esc(r.symbol)}</td><td class="${r.side==='BUY'?'up':'down'}">${sideZh}</td><td>${esc(r.order_type)}</td>
       <td>${r.quantity}</td><td>${r.filled}</td><td>${fmt(r.avg_fill_price)}</td>
       <td>${r.filled > 0 ? amt(r.filled, r.avg_fill_price) : '—'}</td>
+      <td class="${chgCls(r.realized_pnl)}">${r.realized_pnl == null ? '—' : (r.realized_pnl > 0 ? '+' : '') + money(r.realized_pnl)}</td>
       <td class="${stCls}">${esc(r.status)}</td></tr>`;
-  }).join('') : '<tr><td colspan="9" class="empty">今日暂无订单</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="empty">今日暂无订单</td></tr>';
 }
 async function fetchTrades() {
   try { const d = await (await fetch('/api/trades')).json(); renderTrades(d.trades); }

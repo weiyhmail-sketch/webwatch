@@ -248,8 +248,13 @@ class TestSnapshotOpenOrders:
         assert bm.snapshot()["orders"] == []
 
 
-def _fill(shares: float, price: float, t: Any) -> Any:
-    return SimpleNamespace(execution=SimpleNamespace(shares=shares, price=price, time=t))
+def _fill(shares: float, price: float, t: Any, realized: float | None = None) -> Any:
+    # realized=None 模拟未收到佣金回报/开仓腿（ib_async 默认 CommissionReport 全 0）
+    cr = SimpleNamespace(realizedPNL=realized if realized is not None else 0.0)
+    return SimpleNamespace(
+        execution=SimpleNamespace(shares=shares, price=price, time=t),
+        commissionReport=cr,
+    )
 
 
 class _TradeRec:
@@ -293,6 +298,28 @@ class TestTradesToday:
         assert rows[0]["status"] == "Cancelled"  # 最新在前(t2)
         assert rows[1]["status"] == "Filled" and rows[1]["avg_fill_price"] == 200.0
         assert rows[0]["avg_fill_price"] is None
+
+    async def test_realized_pnl_from_commission_reports(self) -> None:
+        # 平仓单：IB 在佣金回报里给出每笔成交的已实现盈亏 → 多笔成交求和
+        ts = pd.Timestamp("2026-06-12T14:06:41Z")
+        rec = _TradeRec("SNDK", "SELL", "LMT", 100, "Filled", 100, 1985.99, ts,
+                        fills=[_fill(60, 1985.99, ts, realized=119.0),
+                               _fill(40, 1985.99, ts, realized=80.0)])
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = _TradesFakeIB([rec])  # type: ignore[assignment]
+        rows = await bm.trades_today()
+        assert rows[0]["realized_pnl"] == 199.0
+
+    async def test_opening_order_realized_pnl_is_none(self) -> None:
+        # 开仓单：佣金回报 realizedPNL 为 0（ib_async 默认）/ UNSET 哨兵 → 不显示盈亏
+        ts = pd.Timestamp("2026-06-12T14:06:35Z")
+        rec = _TradeRec("SNDK", "BUY", "MKT", 100, "Filled", 100, 1984.0, ts,
+                        fills=[_fill(100, 1984.0, ts, realized=0.0),
+                               _fill(0, 0, ts, realized=1.7976931348623157e308)])
+        bm = BrokerManager(IBKRSettings(), PanelConfig({}))
+        bm._ib = _TradesFakeIB([rec])  # type: ignore[assignment]
+        rows = await bm.trades_today()
+        assert rows[0]["realized_pnl"] is None
 
     async def test_filled_uses_fills_when_orderstatus_empty(self) -> None:
         # reqCompletedOrders 取回的已成交单：totalQuantity/filled/avg 为 0，真实成交在 fills 里

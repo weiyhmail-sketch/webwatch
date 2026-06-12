@@ -390,6 +390,7 @@ class BrokerManager:
                 fill_qty = 0.0
                 notional = 0.0
                 fill_time = None
+                realized_parts: list[float] = []
                 for f in fills:
                     ex = getattr(f, "execution", None)
                     if ex is None:
@@ -399,6 +400,13 @@ class BrokerManager:
                     fill_qty += sh
                     notional += sh * px
                     fill_time = getattr(ex, "time", None)
+                    # 平仓成交的佣金回报带已实现盈亏；开仓腿为 0（ib_async 默认）或
+                    # UNSET 哨兵（_finite 滤掉）→ 不计入。0 视为"无盈亏可报"。
+                    cr = getattr(f, "commissionReport", None)
+                    pnl = _finite(getattr(cr, "realizedPNL", None)) if cr is not None else None
+                    if pnl is not None and pnl != 0.0:
+                        realized_parts.append(pnl)
+                realized_pnl = round(sum(realized_parts), 2) if realized_parts else None
                 avg = (notional / fill_qty) if fill_qty else (
                     float(s.avgFillPrice) if s.avgFillPrice else None
                 )
@@ -416,6 +424,7 @@ class BrokerManager:
                         "quantity": qty,
                         "filled": filled,
                         "avg_fill_price": avg,
+                        "realized_pnl": realized_pnl,
                         "status": s.status,
                     }
                 )
