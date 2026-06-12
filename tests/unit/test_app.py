@@ -189,6 +189,28 @@ def _client() -> TestClient:
     return TestClient(create_app(FakeBroker(), auto_connect=False))
 
 
+# 部署 panel.yaml 可关闭风控上限（用户要求）；下列上限注入用于验证「有上限时风控能拦单」，
+# 使风控测试与部署配置解耦——改 panel.yaml 不应让这些回归测试失效。
+def _capped_panel() -> PanelConfig:
+    return PanelConfig(
+        {
+            "risk": {
+                "max_order_notional_usd": "20000",
+                "max_order_shares": 100000,
+                "max_position_risk_pct": "0.005",
+                "account_unavailable_max_notional_usd": "1000",
+                "live_max_order_notional_usd": "20000",
+            }
+        }
+    )
+
+
+def _capped_client(broker: FakeBroker | None = None) -> TestClient:
+    return TestClient(
+        create_app(broker or FakeBroker(), auto_connect=False, panel=_capped_panel())
+    )
+
+
 def test_index_served() -> None:
     with _client() as c:
         r = c.get("/")
@@ -252,12 +274,21 @@ def test_order_preview_ok() -> None:
 
 
 def test_order_preview_notional_rejected() -> None:
-    with _client() as c:
+    with _capped_client() as c:
         # 300 * 100 = 30000 > 上限 20000
         r = c.post("/api/order/preview", json=_order_body(quantity=300, entry_limit="100"))
         body = r.json()
         assert body["rejected"] is True
         assert "notional" in body["reason"]
+
+
+def test_deployed_panel_has_risk_disabled() -> None:
+    # 用户要求关闭下单前风控：部署 panel.yaml 应放行原本会被拦的大额单(300*100=30000)。
+    # 此用例用真实 load_panel_config()，是关闭状态的回归锁；若日后恢复上限，本用例会提醒更新。
+    with _client() as c:
+        r = c.post("/api/order/preview", json=_order_body(quantity=300, entry_limit="100"))
+        body = r.json()
+        assert body["rejected"] is False
 
 
 def test_order_limit_places_bracket() -> None:
@@ -274,7 +305,7 @@ def test_order_limit_places_bracket() -> None:
 
 def test_order_limit_rejected_does_not_place() -> None:
     fake = FakeBroker()
-    with TestClient(create_app(fake, auto_connect=False)) as c:
+    with _capped_client(fake) as c:
         r = c.post("/api/order/limit", json=_order_body(quantity=300, entry_limit="100"))
         assert r.status_code == 400
         assert r.json()["rejected"] is True
@@ -361,7 +392,7 @@ def test_market_order_protection_failed_surfaced(monkeypatch: Any) -> None:
 
 def test_market_order_notional_rejected_does_not_place() -> None:
     fake = FakeBroker()
-    with TestClient(create_app(fake, auto_connect=False)) as c:
+    with _capped_client(fake) as c:
         r = c.post("/api/order/market", json=_market_body(quantity=300, ref_price="100"))
         assert r.status_code == 400
         assert len(fake.market_orders) == 0
@@ -370,7 +401,7 @@ def test_market_order_notional_rejected_does_not_place() -> None:
 def test_order_limit_risk_block_does_not_place() -> None:
     # NAV 很小 → 单笔最大亏损超 0.5% NAV → 风控拦截
     fake = FakeBroker(nav=Decimal("1000"))
-    with TestClient(create_app(fake, auto_connect=False)) as c:
+    with _capped_client(fake) as c:
         r = c.post("/api/order/limit", json=_order_body(quantity=100, entry_limit="50"))
         assert r.status_code == 400
         assert "风控" in r.json()["reason"]
@@ -390,7 +421,7 @@ def test_preview_includes_risk_warnings() -> None:
 def test_account_unavailable_blocks_large_order() -> None:
     # 账户数据不可用 + 大额单 → fail-closed 拒单（盲飞不放大单）
     fake = FakeBroker(nav=None, buying_power=None)
-    with TestClient(create_app(fake, auto_connect=False)) as c:
+    with _capped_client(fake) as c:
         r = c.post("/api/order/limit", json=_order_body(quantity=100, entry_limit="50"))  # 5000>1000
         assert r.status_code == 400
         assert "盲飞" in r.json()["reason"]
@@ -400,7 +431,7 @@ def test_account_unavailable_blocks_large_order() -> None:
 def test_account_unavailable_warns_small_order() -> None:
     # 账户数据不可用 + 小额单 → 仅 WARN，仍可下单
     fake = FakeBroker(nav=None, buying_power=None)
-    with TestClient(create_app(fake, auto_connect=False)) as c:
+    with _capped_client(fake) as c:
         r = c.post("/api/order/limit", json=_order_body(quantity=10, entry_limit="50"))  # 500<1000
         body = r.json()
         assert body["rejected"] is False

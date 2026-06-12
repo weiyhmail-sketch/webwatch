@@ -110,6 +110,20 @@ best-effort 撤入场单；risk 负数量 BLOCK；单笔绝对股数上限 `max_
 **工程固化**：ruff 加 `T20`(禁 print)/`DTZ`(禁 naive datetime)/`BLE`(裸捕获须 noqa 注明)；
 mypy 改按模块 override（不再全局 ignore_missing_imports）；`.coverage` 移出 git。
 
+## ⚠️ 下单前风控已全部关闭（2026-06-10，用户明确要求）
+
+> **切 live 前必须恢复！** 当前 paper 安全，但配置 paper/live 通用——live 下手误可下任意大单无拦截。
+
+- 用户选择「全部风控都关闭」。**改 config/panel.yaml（不动下单链路代码、不触 TDD）**：
+  `max_order_notional_usd` / `max_order_shares` / `account_unavailable_max_notional_usd` /
+  `live_max_order_notional_usd` 全设极大值；`max_position_risk_pct=0`（代码内置的关闭语义）。
+  每行注释保留「原值」，恢复=改回即可。
+- **测试解耦**：给 `create_app(..., panel=...)` 加可注入 panel 入口；5 个验证「有上限时能拦单」的
+  端点测试改用 `_capped_client()`（自带原上限），证明风控逻辑没坏、只是部署配置关了。
+  新增 `test_deployed_panel_has_risk_disabled` 作为「关闭状态」回归锁。
+- 实测：$30k 单、$5亿单 预览均 `rejected:false` 放行。**260 单测全绿**，mypy/ruff 通过。
+- 恢复方法：编辑 config/panel.yaml 的 risk 段，按注释把各值改回原值，重启面板。
+
 ## 做空下单 + 脏代码标的修复（2026-06-10）
 
 - **报价标的删不掉（已修）**：根因是脏字符（引号）混进 watchlist 代码 `A'A'O'I`，前端 ✕ 按钮

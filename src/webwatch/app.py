@@ -264,21 +264,27 @@ async def _broadcast_loop(broker: BrokerLike, manager: ConnectionManager) -> Non
         await manager.broadcast(state)
 
 
-def create_app(broker: BrokerLike | None = None, *, auto_connect: bool = True) -> FastAPI:
-    """构建 app。测试可注入 fake broker 并关掉 auto_connect。"""
+def create_app(
+    broker: BrokerLike | None = None,
+    *,
+    auto_connect: bool = True,
+    panel: PanelConfig | None = None,
+) -> FastAPI:
+    """构建 app。测试可注入 fake broker（关掉 auto_connect）与自带上限的 panel
+    （使风控测试与部署 panel.yaml 解耦——部署可关上限，测试仍验证有上限时能拦单）。"""
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        panel = load_panel_config()
+        eff_panel = panel if panel is not None else load_panel_config()
         if broker is not None:
             b: BrokerLike = broker
         else:
             eff_env, env_warning = resolve_environment()  # live 二重互锁
             if eff_env.value == "live":
                 log.warning("⚠️ 启动于 LIVE 实盘环境（端口 4001）")
-            b = BrokerManager(load_settings(eff_env), panel, env_warning=env_warning)
+            b = BrokerManager(load_settings(eff_env), eff_panel, env_warning=env_warning)
         app.state.broker = b
-        app.state.panel = panel
+        app.state.panel = eff_panel
         if auto_connect:
             with contextlib.suppress(Exception):
                 await b.connect()
