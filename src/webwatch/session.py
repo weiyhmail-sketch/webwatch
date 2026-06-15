@@ -53,15 +53,23 @@ def now_et() -> datetime:
 
 
 def current_session(dt: datetime | None = None) -> Session:
-    """判定 ``dt``（默认当前 ET）所处时段。周末粗略归 CLOSED（夜盘跨周边界不精细处理）。"""
+    """判定 ``dt``（默认当前 ET）所处时段。
+
+    夜盘(Blue Ocean)周开市窗口：**周日 20:00 ET 开盘 → 周五 20:00 ET 收盘**，
+    其间连续运行（工作日内嵌盘前/RTH/盘后）。故周末边界需精细处理：
+    - 周六全天休市；
+    - 周日 20:00 前休市，20:00 起夜盘开市（本周首个可交易时段）；
+    - 周五 20:00 后休市（夜盘不延续到周末），但周五凌晨 00:00–04:00 是周四夜盘延续，仍可交易。
+    """
     dt = dt or now_et()
     weekday = dt.weekday()  # 0=周一 … 6=周日
     t = dt.time()
-    # 周六全天、周日 20:00 前：休市（周日晚的夜盘开始这里简化为仍 CLOSED，安全方向）。
+    # 周六全天休市。
     if weekday == 5:
         return Session.CLOSED
+    # 周日：20:00 前休市；20:00 起夜盘开市。
     if weekday == 6:
-        return Session.CLOSED
+        return Session.OVERNIGHT if t >= _POST_CLOSE else Session.CLOSED
     # 周一到周五：
     if _RTH_OPEN <= t < _RTH_CLOSE:
         return Session.RTH
@@ -69,7 +77,9 @@ def current_session(dt: datetime | None = None) -> Session:
         return Session.PRE
     if _RTH_CLOSE <= t < _POST_CLOSE:
         return Session.POST
-    # 其余（20:00–次日 04:00）= 夜盘
+    # 其余（20:00–次日 04:00）= 夜盘；但周五 20:00 后进入周末，夜盘不开 → 休市。
+    if weekday == 4 and t >= _POST_CLOSE:
+        return Session.CLOSED
     return Session.OVERNIGHT
 
 
